@@ -1,33 +1,28 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-
 	import { fade } from 'svelte/transition';
-
 	import { pushState } from '$app/navigation';
-
-	import { setMode, mode } from 'mode-watcher';
-
 	import { toast } from 'svelte-sonner';
 
-	import * as maplibregl from 'maplibre-gl';
-	import 'maplibre-gl/dist/maplibre-gl.css';
+	// Import Leaflet (sera importé dynamiquement dans onMount pour éviter SSR)
+	import 'leaflet/dist/leaflet.css';
 
-	import { omProtocol, getValueFromLatLong } from '../om-protocol';
+	// import { omProtocol, getValueFromLatLong } from '../om-protocol'; // TODO: Adapter pour Leaflet
 	import { pad } from '$lib/utils/pad';
 	import { domains } from '$lib/utils/domains';
 	import { hideZero, variables } from '$lib/utils/variables';
 	import { createTimeSlider } from '$lib/components/time-slider';
 
 	import type { Variable, Domain } from '$lib/types';
-
-	import * as Sheet from '$lib/components/ui/sheet';
 	import * as Drawer from '$lib/components/ui/drawer';
-
 	import { getColorScale } from '$lib/utils/color-scales';
 
+	// Import utilitaires Leaflet
+	import { loadLeaflet, createLeafletMap } from '$lib/leaflet-utils';
+
+	// Simplified state
 	let partial = $state(false);
 	let showScale = $state(true);
-	let sheetOpen = $state(false);
 	let drawerOpen = $state(false);
 	let showTimeSelector = $state(true);
 
@@ -36,211 +31,35 @@
 	import SelectedVariables from '$lib/components/scale/selected-variables.svelte';
 	import VariableSelection from '$lib/components/selection/variable-selection.svelte';
 
-	let darkMode = $derived(mode.current);
 	let timeSliderApi: { setDisabled: (d: boolean) => void; setBackToPreviousDate: () => void };
 	let timeSliderContainer: HTMLElement;
 
-	const addHillshadeLayer = () => {
-		map.setSky({
-			'sky-color': '#000000',
-			'sky-horizon-blend': 0.8,
-			'horizon-color': '#80C1FF',
-			'horizon-fog-blend': 0.6,
-			'fog-color': '#D6EAFF',
-			'fog-ground-blend': 0
+	// Leaflet layer management
+	let omFileLayer: any = null;
+
+		const addOmFileLayer = async () => {
+		if (!map || !omUrl) return;
+
+		// Import de la couche OMaps personnalisée
+		const { createOMapsLayer } = await import('$lib/leaflet-omaps-layer');
+
+		// Créer la couche OMaps
+		omFileLayer = await createOMapsLayer({
+			omUrl: omUrl,
+			domain: domain,
+			variable: variable,
+			opacity: 0.8
 		});
 
-		map.addSource('terrainSource', {
-			type: 'raster-dem',
-			tiles: ['https://mapproxy.servert.nl/wmts/copernicus/webmercator/{z}/{x}/{y}.png'],
-			tileSize: 512,
-			scheme: 'tms',
-			maxzoom: 10
-		});
-
-		map.addSource('hillshadeSource', {
-			type: 'raster-dem',
-			tiles: ['https://mapproxy.servert.nl/wmts/copernicus/webmercator/{z}/{x}/{y}.png'],
-			tileSize: 512,
-			scheme: 'tms',
-			maxzoom: 10
-		});
-
-		map.addLayer(
-			{
-				source: 'hillshadeSource',
-				id: 'hillshadeLayer',
-				type: 'hillshade',
-				paint: {
-					'hillshade-method': 'igor',
-					//'hillshade-exaggeration': 1,
-					'hillshade-shadow-color': 'rgba(0,0,0,0.4)',
-					'hillshade-highlight-color': 'rgba(255,255,255,0.35)'
-				}
-			},
-			'waterway-tunnel'
-		);
+		// Ajouter la couche à la carte
+		omFileLayer.addTo(map);
 	};
 
-	const addOmFileLayer = () => {
-		map.addSource('omFileSource', {
-			type: 'raster',
-			url: 'om://' + omUrl,
-			tileSize: TILE_SIZE
-		});
-
-		omFileSource = map.getSource('omFileSource');
-		if (omFileSource) {
-			omFileSource.on('error', (e) => {
-				checked = 0;
-				timeSliderApi.setDisabled(false);
-				loading = false;
-				clearInterval(checkSourceLoadedInterval);
-				toast(e.error.message);
-			});
-		}
-
-		map.addLayer(
-			{
-				source: 'omFileSource',
-				id: 'omFileLayer',
-				type: 'raster'
-			},
-			'waterway-tunnel'
-		);
-	};
-
-	class SettingsButton {
-		onAdd() {
-			const div = document.createElement('div');
-			div.title = 'Settings';
-			div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-			div.innerHTML = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings-icon lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>`;
-			div.addEventListener('contextmenu', (e) => e.preventDefault());
-			div.addEventListener('click', () => {
-				sheetOpen = !sheetOpen;
-			});
-
-			return div;
-		}
-		onRemove() {}
-	}
-	class VariableButton {
-		onAdd() {
-			const div = document.createElement('div');
-			div.title = 'Variables';
-			div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-			div.innerHTML = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"  stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-images-icon lucide-images"><path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/></svg>
-        </button>`;
-			div.addEventListener('contextmenu', (e) => e.preventDefault());
-			div.addEventListener('click', () => {
-				drawerOpen = !drawerOpen;
-			});
-
-			return div;
-		}
-		onRemove() {}
-	}
-	class DarkModeButton {
-		onAdd() {
-			const div = document.createElement('div');
-			div.title = 'Darkmode';
-
-			div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-
-			const darkSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-		<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sun-icon lucide-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-             </button>`;
-
-			const lightSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-		<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-moon-icon lucide-moon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-        </button>`;
-			div.innerHTML = mode.current !== 'dark' ? lightSVG : darkSVG;
-			div.addEventListener('contextmenu', (e) => e.preventDefault());
-			div.addEventListener('click', () => {
-				if (mode.current === 'light') {
-					setMode('dark');
-				} else {
-					setMode('light');
-				}
-				div.innerHTML = mode.current !== 'dark' ? lightSVG : darkSVG;
-				map.setStyle(
-					`https://maptiler.servert.nl/styles/basic-world-maps${mode.current === 'dark' ? '-dark' : ''}/style.json`
-				);
-
-				map.once('styledata', () => {
-					addHillshadeLayer();
-					addOmFileLayer();
-				});
-			});
-			return div;
-		}
-		onRemove() {}
-	}
-
-	class PartialButton {
-		onAdd() {
-			const div = document.createElement('div');
-			div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-			div.title = 'Partial requests';
-
-			const partialSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-database-zap-icon lucide-database-zap"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 15 21.84"/><path d="M21 5V8"/><path d="M21 12L18 17H22L19 22"/><path d="M3 12A9 3 0 0 0 14.59 14.87"/></svg>
-             </button>`;
-
-			const fullSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-database-icon lucide-database"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
-        </button>`;
-			div.innerHTML = partial ? partialSVG : fullSVG;
-			div.addEventListener('contextmenu', (e) => e.preventDefault());
-			div.addEventListener('click', () => {
-				partial = !partial;
-				div.innerHTML = partial ? partialSVG : fullSVG;
-				if (partial) {
-					url.searchParams.set('partial', String(partial));
-				} else {
-					url.searchParams.delete('partial');
-				}
-				pushState(url + map._hash.getHashString(), {});
-				setTimeout(() => changeOMfileURL(), 500);
-			});
-			return div;
-		}
-		onRemove() {}
-	}
-
-	class TimeButton {
-		onAdd() {
-			const div = document.createElement('div');
-			div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-			div.title = 'Time selector';
-
-			const clockSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2"  width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"  stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calendar-clock-icon lucide-calendar-clock"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/></svg>
-			 </button>`;
-			const calendarSVG = `<button style="display:flex;justify-content:center;align-items:center;">
-				<svg xmlns="http://www.w3.org/2000/svg" opacity="0.75" stroke-width="1.2" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"  stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calendar-off-icon lucide-calendar-off"><path d="M4.2 4.2A2 2 0 0 0 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 1.82-1.18"/><path d="M21 15.5V6a2 2 0 0 0-2-2H9.5"/><path d="M16 2v4"/><path d="M3 10h7"/><path d="M21 10h-5.5"/><path d="m2 2 20 20"/></svg>
-			</button>`;
-
-			div.innerHTML = clockSVG;
-			div.addEventListener('contextmenu', (e) => e.preventDefault());
-			div.addEventListener('click', () => {
-				showTimeSelector = !showTimeSelector;
-				div.innerHTML = showTimeSelector ? clockSVG : calendarSVG;
-			});
-			return div;
-		}
-		onRemove() {}
-	}
-
-	let map: maplibregl.Map;
+	// Leaflet map variables
+	let map: any; // Type Leaflet sera défini dynamiquement
 	let mapContainer: HTMLElement | null;
-
 	let omUrl: string;
-	let popup: maplibregl.Popup | undefined;
+	let popup: any;
 
 	let url: URL;
 	let params: URLSearchParams;
@@ -253,43 +72,40 @@
 	let variable: Variable = $state({ value: 'temperature_2m', label: 'Temperature 2m' });
 	let timeSelected = $state(new Date());
 	let modelRunSelected = $state(new Date());
-	let mapBounds: maplibregl.LngLatBounds = $state();
+	let mapBounds: any = $state();
 
-	const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE);
-
-	let checkSourceLoadedInterval: ReturnType<typeof setInterval>;
-	let checked = 0;
+	const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 
 	let loading = $state(false);
-	let omFileSource: maplibregl.RasterTileSource | undefined;
-	let hillshadeLayer: maplibregl.HillshadeLayerSpecification | undefined;
 
-	const changeOMfileURL = () => {
-		if (map && omFileSource) {
+	const changeOMfileURL = async () => {
+		if (map) {
 			loading = true;
 			if (popup) {
 				popup.remove();
 			}
 
 			mapBounds = map.getBounds();
-			timeSliderApi.setDisabled(true);
+			if (timeSliderApi) {
+				timeSliderApi.setDisabled(true);
+			}
 
 			omUrl = getOMUrl();
-			omFileSource.setUrl('om://' + omUrl);
 
-			checkSourceLoadedInterval = setInterval(() => {
-				checked++;
-				if ((omFileSource && omFileSource.loaded()) || checked >= 200) {
-					if (checked >= 200) {
-						// Timeout after 10s
-						toast('Request timed out');
-					}
-					checked = 0;
+			// Supprimer l'ancienne couche et en créer une nouvelle
+			if (omFileLayer) {
+				map.removeLayer(omFileLayer);
+			}
+
+			await addOmFileLayer();
+
+			// Simple loading simulation
+			setTimeout(() => {
+				if (timeSliderApi) {
 					timeSliderApi.setDisabled(false);
-					loading = false;
-					clearInterval(checkSourceLoadedInterval);
 				}
-			}, 50);
+				loading = false;
+			}, 1000);
 		}
 	};
 
@@ -342,127 +158,85 @@
 		}
 	});
 
-	let showPopup = false;
-	onMount(() => {
-		maplibregl.addProtocol('om', omProtocol);
+			let showPopup = false;
 
-		map = new maplibregl.Map({
-			container: mapContainer as HTMLElement,
-			style: `https://maptiler.servert.nl/styles/basic-world-maps${mode.current === 'dark' ? '-dark' : ''}/style.json`,
-			center: typeof domain.grid.center == 'object' ? domain.grid.center : [0, 0],
-			zoom: domain?.grid.zoom,
-			keyboard: false,
-			hash: true,
-			maxZoom: 20,
-			maxPitch: 85
+	onMount(async () => {
+		// Import Leaflet dynamiquement pour éviter les problèmes SSR
+		const L = await loadLeaflet();
+		const { createLeafletControl } = await import('$lib/leaflet-utils');
+
+		// Créer les contrôles personnalisés Leaflet
+		const variableControl = await createLeafletControl({
+			onAdd: function(map) {
+				const div = L.DomUtil.create('div', 'leaflet-control-variable');
+				div.innerHTML = `<button style="padding: 5px; background: white; border: 1px solid #ccc; border-radius: 3px;" title="Variables">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+						<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/>
+						<circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>
+					</svg>
+				</button>`;
+
+				L.DomEvent.on(div, 'click', () => {
+					drawerOpen = !drawerOpen;
+				});
+
+				return div;
+			}
+		}, { position: 'topright' });
+
+		const timeControl = await createLeafletControl({
+			onAdd: function(map) {
+				const div = L.DomUtil.create('div', 'leaflet-control-time');
+				div.innerHTML = `<button style="padding: 5px; background: white; border: 1px solid #ccc; border-radius: 3px;" title="Time Selector">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+						<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>
+						<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>
+					</svg>
+				</button>`;
+
+				L.DomEvent.on(div, 'click', () => {
+					showTimeSelector = !showTimeSelector;
+				});
+
+				return div;
+			}
+		}, { position: 'topright' });
+
+		// Créer la carte Leaflet
+		map = await createLeafletMap(mapContainer as HTMLElement, {
+			center: typeof domain.grid.center == 'object' ? [domain.grid.center.lat, domain.grid.center.lng] : [47.3769, 8.5417],
+			zoom: domain?.grid.zoom || 6
 		});
 
-		map.touchZoomRotate.disableRotation();
+		// Ajouter les contrôles
+		variableControl.addTo(map);
+		timeControl.addTo(map);
 
-		// Add zoom and rotation controls to the map.
-		map.addControl(
-			new maplibregl.NavigationControl({
-				visualizePitch: true,
-				showZoom: true,
-				showCompass: true
-			})
-		);
+		// Initialiser les bounds
+		mapBounds = map.getBounds();
 
-		// Add geolocate control to the map.
-		map.addControl(
-			new maplibregl.GeolocateControl({
-				fitBoundsOptions: {
-					maxZoom: 13.5
-				},
-				positionOptions: {
-					enableHighAccuracy: true
-				},
-				trackUserLocation: true
-			})
-		);
+		// Charger les données du domaine
+		latest = await getDomainData();
+		omUrl = getOMUrl();
+		await addOmFileLayer();
 
-		map.addControl(new maplibregl.GlobeControl());
+		// Setup time slider
+		timeSliderApi = createTimeSlider({
+			container: timeSliderContainer,
+			initialDate: timeSelected,
+			onChange: async (newDate) => {
+				timeSelected = newDate;
+				url.searchParams.set('time', newDate.toISOString().replace(/[:Z]/g, '').slice(0, 15));
+				history.pushState({}, '', url);
+				await changeOMfileURL();
+			},
+			resolution: domain.time_interval
+		});
 
-		// improved scrolling
-		map.scrollZoom.setZoomRate(1 / 85);
-		map.scrollZoom.setWheelZoomRate(1 / 85);
-
-		map.on('load', async () => {
-			mapBounds = map.getBounds();
-
-			addHillshadeLayer();
-
-			map.addControl(
-				new maplibregl.TerrainControl({
-					source: 'terrainSource',
-					exaggeration: 1
-				})
-			);
-
-			map.addControl(new SettingsButton());
-			map.addControl(new VariableButton());
-			map.addControl(new DarkModeButton());
-			map.addControl(new PartialButton());
-			map.addControl(new TimeButton());
-
-			latest = await getDomainData();
-			omUrl = getOMUrl();
-
-			addOmFileLayer();
-
-			map.on('mousemove', function (e) {
-				if (showPopup) {
-					const coordinates = e.lngLat;
-					if (!popup) {
-						popup = new maplibregl.Popup()
-							.setLngLat(coordinates)
-							.setHTML(`<span class="value-popup">Outside domain</span>`)
-							.addTo(map);
-					} else {
-						popup.addTo(map);
-					}
-					let { index, value } = getValueFromLatLong(coordinates.lat, coordinates.lng, colorScale);
-					if (index) {
-						if ((hideZero.includes(variable.value) && value <= 0.25) || !value) {
-							popup.remove();
-						} else {
-							let string = '';
-							if (variable.value.startsWith('wind_')) {
-								string = `${value.toFixed(0)}kn`;
-							} else {
-								string = value.toFixed(1) + (variable.value.startsWith('temperature') ? 'C°' : '');
-							}
-
-							popup.setLngLat(coordinates).setHTML(`<span class="value-popup">${string}</span>`);
-						}
-					} else {
-						popup.setLngLat(coordinates).setHTML(`<span class="value-popup">Outside domain</span>`);
-					}
-				}
-			});
-
-			map.on('click', (e) => {
-				showPopup = !showPopup;
-				if (!showPopup && popup) {
-					popup.remove();
-				}
-				if (showPopup && popup) {
-					const coordinates = e.lngLat;
-					popup.setLngLat(coordinates).addTo(map);
-				}
-			});
-
-			timeSliderApi = createTimeSlider({
-				container: timeSliderContainer,
-				initialDate: timeSelected,
-				onChange: (newDate) => {
-					timeSelected = newDate;
-					url.searchParams.set('time', newDate.toISOString().replace(/[:Z]/g, '').slice(0, 15));
-					history.pushState({}, '', url);
-					changeOMfileURL();
-				},
-				resolution: domain.time_interval
-			});
+		// Gestionnaire de clic basique
+		map.on('click', (e: any) => {
+			showPopup = !showPopup;
+			console.log('Map clicked at:', e.latlng);
 		});
 	});
 	onDestroy(() => {
@@ -475,7 +249,8 @@
 	});
 
 	const getOMUrl = () => {
-		return `https://map-tiles.open-meteo.com/data_spatial/${domain.value}/${modelRunSelected.getUTCFullYear()}/${pad(modelRunSelected.getUTCMonth() + 1)}/${pad(modelRunSelected.getUTCDate())}/${pad(modelRunSelected.getUTCHours())}00Z/${timeSelected.getUTCFullYear()}-${pad(timeSelected.getUTCMonth() + 1)}-${pad(timeSelected.getUTCDate())}T${pad(timeSelected.getUTCHours())}00.om?dark=${darkMode}&variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
+		if (!mapBounds) return '';
+		return `https://map-tiles.open-meteo.com/data_spatial/${domain.value}/${modelRunSelected.getUTCFullYear()}/${pad(modelRunSelected.getUTCMonth() + 1)}/${pad(modelRunSelected.getUTCDate())}/${pad(modelRunSelected.getUTCHours())}00Z/${timeSelected.getUTCFullYear()}-${pad(timeSelected.getUTCMonth() + 1)}-${pad(timeSelected.getUTCDate())}T${pad(timeSelected.getUTCHours())}00.om?dark=false&variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
 	};
 
 	let colorScale = $derived.by(() => {
@@ -564,10 +339,6 @@
 	></div>
 </div>
 <div class="absolute">
-	<Sheet.Root bind:open={sheetOpen}>
-		<Sheet.Content><div class="px-6 pt-12">Units</div></Sheet.Content>
-	</Sheet.Root>
-
 	<Drawer.Root bind:open={drawerOpen}>
 		<Drawer.Content class="h-1/3">
 			<div class="flex flex-col items-center overflow-y-scroll pb-12">
@@ -583,14 +354,14 @@
 						domainChange={(value: string) => {
 							domain = domains.find((dm) => dm.value === value) ?? domains[0];
 							url.searchParams.set('domain', value);
-							pushState(url + map._hash.getHashString(), {});
+							pushState(url.toString(), {});
 							toast('Domain set to: ' + domain.label);
 							changeOMfileURL();
 						}}
 						modelRunChange={(mr: Date) => {
 							modelRunSelected = mr;
 							url.searchParams.set('model', mr.toISOString().replace(/[:Z]/g, '').slice(0, 15));
-							pushState(url + map._hash.getHashString(), {});
+							pushState(url.toString(), {});
 							toast(
 								'Model run set to: ' +
 									mr.getUTCFullYear() +
@@ -608,7 +379,7 @@
 						variableChange={(value: string) => {
 							variable = variables.find((v) => v.value === value) ?? variables[0];
 							url.searchParams.set('variable', variable.value);
-							pushState(url + map._hash.getHashString(), {});
+							pushState(url.toString(), {});
 							toast('Variable set to: ' + variable.label);
 							changeOMfileURL();
 						}}
