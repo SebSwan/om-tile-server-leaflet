@@ -37,22 +37,32 @@
 	// Leaflet layer management
 	let omFileLayer: any = null;
 
-		const addOmFileLayer = async () => {
+			const addOmFileLayer = async () => {
 		if (!map || !omUrl) return;
 
-		// Import de la couche OMaps personnalisée
-		const { createOMapsLayer } = await import('$lib/leaflet-omaps-layer');
+		console.log('🚀 [PAGE] addOmFileLayer() appelée:', {
+			omUrl: omUrl.substring(0, 100) + '...',
+			domain: domain.value,
+			variable: variable.value
+		});
 
-		// Créer la couche OMaps
-		omFileLayer = await createOMapsLayer({
+		// Import de la couche OMaps avec worker
+		const { createOMapsLayerWithWorker } = await import('$lib/leaflet-omaps-layer');
+
+		// Créer la couche OMaps avec vraies données météo
+		omFileLayer = await createOMapsLayerWithWorker({
 			omUrl: omUrl,
 			domain: domain,
 			variable: variable,
 			opacity: 0.8
 		});
 
+		console.log('✅ [PAGE] Couche OMaps créée, ajout à la carte');
+
 		// Ajouter la couche à la carte
 		omFileLayer.addTo(map);
+
+		console.log('🗺️ [PAGE] Couche OMaps ajoutée à la carte Leaflet');
 	};
 
 	// Leaflet map variables
@@ -87,7 +97,7 @@
 
 			mapBounds = map.getBounds();
 			if (timeSliderApi) {
-				timeSliderApi.setDisabled(true);
+			timeSliderApi.setDisabled(true);
 			}
 
 			omUrl = getOMUrl();
@@ -158,7 +168,7 @@
 		}
 	});
 
-			let showPopup = false;
+	let showPopup = false;
 
 	onMount(async () => {
 		// Import Leaflet dynamiquement pour éviter les problèmes SSR
@@ -213,25 +223,25 @@
 		timeControl.addTo(map);
 
 		// Initialiser les bounds
-		mapBounds = map.getBounds();
+			mapBounds = map.getBounds();
 
 		// Charger les données du domaine
-		latest = await getDomainData();
-		omUrl = getOMUrl();
+			latest = await getDomainData();
+			omUrl = getOMUrl();
 		await addOmFileLayer();
 
 		// Setup time slider
-		timeSliderApi = createTimeSlider({
-			container: timeSliderContainer,
-			initialDate: timeSelected,
+			timeSliderApi = createTimeSlider({
+				container: timeSliderContainer,
+				initialDate: timeSelected,
 			onChange: async (newDate) => {
-				timeSelected = newDate;
-				url.searchParams.set('time', newDate.toISOString().replace(/[:Z]/g, '').slice(0, 15));
-				history.pushState({}, '', url);
+					timeSelected = newDate;
+					url.searchParams.set('time', newDate.toISOString().replace(/[:Z]/g, '').slice(0, 15));
+					history.pushState({}, '', url);
 				await changeOMfileURL();
-			},
-			resolution: domain.time_interval
-		});
+				},
+				resolution: domain.time_interval
+			});
 
 		// Gestionnaire de clic basique
 		map.on('click', (e: any) => {

@@ -8,7 +8,7 @@ import { getColorScale, getInterpolator } from '$lib/utils/color-scales';
 
 import type { ColorScale, Domain, IndexAndFractions } from '$lib/types';
 
-const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) * 2;
+const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 const OPACITY = Number(import.meta.env.VITE_TILE_OPACITY);
 
 // const rotatePoint = (cx: number, cy: number, theta: number, x: number, y: number) => {
@@ -127,12 +127,24 @@ const getIndexAndFractions = (
 
 self.onmessage = async (message) => {
 	if (message.data.type == 'GT') {
+		const workerProcessingStart = performance.now();
+		console.log('🔧 [WORKER] Message GT reçu - Début traitement:', {
+			key: message.data.key,
+			coords: { x: message.data.x, y: message.data.y, z: message.data.z },
+			outputFormat: message.data.outputFormat || 'maplibre',
+			dataSize: message.data.data?.values?.length || 0,
+			domain: message.data.domain?.value,
+			variable: message.data.variable?.value,
+			startTime: workerProcessingStart
+		});
+
 		const key = message.data.key;
 		const x = message.data.x;
 		const y = message.data.y;
 		const z = message.data.z;
 		const values = message.data.data.values;
 		const ranges = message.data.ranges;
+		const outputFormat = message.data.outputFormat || 'maplibre'; // 🆕 Format de sortie
 
 		const domain = message.data.domain;
 		const variable = message.data.variable;
@@ -142,6 +154,16 @@ self.onmessage = async (message) => {
 		const rgba = new Uint8ClampedArray(pixels * 4);
 		const dark = message.data.dark;
 
+		console.log('🎨 [WORKER] Configuration traitement:', {
+			tileSize: TILE_SIZE,
+			pixels: pixels,
+			colorScale: {
+				min: colorScale.min,
+				max: colorScale.max,
+				unit: colorScale.unit
+			}
+		});
+
 		let projectionGrid = null;
 		if (domain.grid.projection) {
 			const projectionName = domain.grid.projection.name;
@@ -150,9 +172,14 @@ self.onmessage = async (message) => {
 				domain.grid.projection
 			) as Projection;
 			projectionGrid = new ProjectionGrid(projection, domain.grid, ranges);
+			console.log('🗺️ [WORKER] Projection configurée:', projectionName);
 		}
 
 		const interpolator = getInterpolator(colorScale);
+
+		console.log('🔄 [WORKER] Début génération pixels...');
+		let pixelsProcessed = 0;
+		let validPixels = 0;
 
 		for (let i = 0; i < TILE_SIZE; i++) {
 			const lat = tile2lat(y + i / TILE_SIZE, z);
@@ -195,42 +222,56 @@ self.onmessage = async (message) => {
 						rgba[4 * ind + 1] = color[1];
 						rgba[4 * ind + 2] = color[2];
 						rgba[4 * ind + 3] = getOpacity(variable.value, px, dark);
+						validPixels++;
 					}
 				}
+				pixelsProcessed++;
 			}
 		}
 
+		console.log('✅ [WORKER] Génération pixels terminée:', {
+			pixelsProcessed: pixelsProcessed,
+			validPixels: validPixels,
+			percentValid: ((validPixels / pixelsProcessed) * 100).toFixed(1) + '%'
+		});
+
 		if (drawOnTiles.includes(variable.value)) {
-			// const iconPixelData = message.data.iconPixelData;
-			// let reg = new RegExp(/wind_(\d+)m/);
-			// const matches = variable.value.match(reg);
-			// if (matches) {
-			// 	const boxSize = Math.floor(TILE_SIZE / 16);
-			// 	for (let i = 0; i < TILE_SIZE; i += boxSize) {
-			// 		for (let j = 0; j < TILE_SIZE; j += boxSize) {
-			// 			drawArrow(
-			// 				rgba,
-			// 				i,
-			// 				j,
-			// 				x,
-			// 				y,
-			// 				z,
-			// 				nx,
-			// 				domain,
-			// 				projectionGrid,
-			// 				values,
-			// 				directions,
-			// 				boxSize,
-			// 				iconPixelData
-			// 			);
-			// 		}
-			// 	}
-			// }
+			console.log('🎯 [WORKER] Application des icônes sur tuile...');
+			// Icônes désactivées pour simplifier
 		}
 
-		const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
+		// 🆕 FORMAT DE SORTIE ADAPTATIF
+		const workerProcessingEnd = performance.now();
+		const totalProcessingTime = workerProcessingEnd - workerProcessingStart;
 
-		postMessage({ type: 'RT', tile: tile, key: key });
+		if (outputFormat === 'leaflet') {
+			console.log('🍃 [WORKER] Format Leaflet - Retour RGBA directement:', {
+				processingTime: `${totalProcessingTime.toFixed(2)}ms`,
+				pixelsGenerated: TILE_SIZE * TILE_SIZE,
+				rgbaSize: rgba.length
+			});
+			postMessage({
+				type: 'RT',
+				rgba: rgba,           // ⚠️ Données RGBA brutes pour Leaflet
+				width: TILE_SIZE,
+				height: TILE_SIZE,
+				key: key,
+				processingTime: totalProcessingTime
+			});
+		} else {
+			console.log('🗺️ [WORKER] Format MapLibre - Création ImageBitmap:', {
+				processingTime: `${totalProcessingTime.toFixed(2)}ms`
+			});
+			const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
+			postMessage({
+				type: 'RT',
+				tile: tile,
+				key: key,
+				processingTime: totalProcessingTime
+			});
+		}
+
+		console.log('📤 [WORKER] Réponse envoyée, fermeture worker - Temps total:', `${totalProcessingTime.toFixed(2)}ms`);
 		self.close();
 	}
 };
