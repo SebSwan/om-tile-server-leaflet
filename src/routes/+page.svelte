@@ -11,10 +11,8 @@
 	import { pad } from '$lib/utils/pad';
 	import { domains } from '$lib/utils/domains';
 	import { hideZero, variables } from '$lib/utils/variables';
-	import { createTimeSlider } from '$lib/components/time-slider';
 
 	import type { Variable, Domain } from '$lib/types';
-	import * as Drawer from '$lib/components/ui/drawer';
 	import { getColorScale } from '$lib/utils/color-scales';
 
 	// Import utilitaires Leaflet
@@ -23,16 +21,14 @@
 	// Simplified state
 	let partial = $state(false);
 	let showScale = $state(true);
-	let drawerOpen = $state(false);
 	let showTimeSelector = $state(true);
 
 	import '../styles.css';
 	import Scale from '$lib/components/scale/scale.svelte';
-	import SelectedVariables from '$lib/components/scale/selected-variables.svelte';
-	import VariableSelection from '$lib/components/selection/variable-selection.svelte';
+	import { CustomSelect } from '$lib/components/ui/custom-select';
+	import { SimpleTimeSlider } from '$lib/components/ui/simple-time-slider';
 
-	let timeSliderApi: { setDisabled: (d: boolean) => void; setBackToPreviousDate: () => void };
-	let timeSliderContainer: HTMLElement;
+	// Le time slider est maintenant géré par le composant SimpleTimeSlider
 
 	// Leaflet layer management
 	let omFileLayer: any = null;
@@ -74,15 +70,32 @@
 	let url: URL;
 	let params: URLSearchParams;
 
-	let domain: Domain = $state({
-		value: 'meteoswiss_icon_ch1',
-		label: 'DWD ICON D2',
-		model_interval: 3
-	});
+	let domain: Domain = $state(
+		domains.find(d => d.value === 'dwd_icon_d2') ?? domains[0]
+	);
 	let variable: Variable = $state({ value: 'temperature_2m', label: 'Temperature 2m' });
 	let timeSelected = $state(new Date());
 	let modelRunSelected = $state(new Date());
 	let mapBounds: any = $state();
+
+	// Variables filtrées selon le domaine sélectionné
+	const availableVariables = $derived(
+		variables.filter(v => domain.variables.includes(v.value))
+	);
+
+	// Auto-sélection de variable compatible quand domaine change
+	$effect(() => {
+		if (!domain.variables.includes(variable.value)) {
+			// Essayer de trouver temperature_2m en priorité
+			const tempVar = availableVariables.find(v => v.value === 'temperature_2m');
+			if (tempVar) {
+				variable = tempVar;
+			} else if (availableVariables.length > 0) {
+				variable = availableVariables[0];
+			}
+			console.log('🔄 [VARIABLE] Auto-sélection:', variable.value, 'pour domaine:', domain.value);
+		}
+	});
 
 	const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 
@@ -96,9 +109,7 @@
 			}
 
 			mapBounds = map.getBounds();
-			if (timeSliderApi) {
-			timeSliderApi.setDisabled(true);
-			}
+			// Le time slider sera désactivé via le composant SimpleTimeSlider
 
 			omUrl = getOMUrl();
 
@@ -111,9 +122,6 @@
 
 			// Simple loading simulation
 			setTimeout(() => {
-				if (timeSliderApi) {
-					timeSliderApi.setDisabled(false);
-				}
 				loading = false;
 			}, 1000);
 		}
@@ -173,44 +181,9 @@
 	onMount(async () => {
 		// Import Leaflet dynamiquement pour éviter les problèmes SSR
 		const L = await loadLeaflet();
-		const { createLeafletControl } = await import('$lib/leaflet-utils');
+		// Import supprimé car plus nécessaire
 
-		// Créer les contrôles personnalisés Leaflet
-		const variableControl = await createLeafletControl({
-			onAdd: function(map) {
-				const div = L.DomUtil.create('div', 'leaflet-control-variable');
-				div.innerHTML = `<button style="padding: 5px; background: white; border: 1px solid #ccc; border-radius: 3px;" title="Variables">
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-						<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/>
-						<circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>
-					</svg>
-				</button>`;
-
-				L.DomEvent.on(div, 'click', () => {
-					drawerOpen = !drawerOpen;
-				});
-
-				return div;
-			}
-		}, { position: 'topright' });
-
-		const timeControl = await createLeafletControl({
-			onAdd: function(map) {
-				const div = L.DomUtil.create('div', 'leaflet-control-time');
-				div.innerHTML = `<button style="padding: 5px; background: white; border: 1px solid #ccc; border-radius: 3px;" title="Time Selector">
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-						<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>
-						<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>
-					</svg>
-				</button>`;
-
-				L.DomEvent.on(div, 'click', () => {
-					showTimeSelector = !showTimeSelector;
-				});
-
-				return div;
-			}
-		}, { position: 'topright' });
+		// Note: Contrôles déplacés vers des boutons Svelte natifs pour une meilleure réactivité
 
 		// Créer la carte Leaflet
 		map = await createLeafletMap(mapContainer as HTMLElement, {
@@ -218,9 +191,7 @@
 			zoom: domain?.grid.zoom || 6
 		});
 
-		// Ajouter les contrôles
-		variableControl.addTo(map);
-		timeControl.addTo(map);
+		// Panneau de statut supprimé pour épurer l'interface
 
 		// Initialiser les bounds
 			mapBounds = map.getBounds();
@@ -230,18 +201,7 @@
 			omUrl = getOMUrl();
 		await addOmFileLayer();
 
-		// Setup time slider
-			timeSliderApi = createTimeSlider({
-				container: timeSliderContainer,
-				initialDate: timeSelected,
-			onChange: async (newDate) => {
-					timeSelected = newDate;
-					url.searchParams.set('time', newDate.toISOString().replace(/[:Z]/g, '').slice(0, 15));
-					history.pushState({}, '', url);
-				await changeOMfileURL();
-				},
-				resolution: domain.time_interval
-			});
+		// Le time slider sera maintenant géré par le composant SimpleTimeSlider
 
 		// Gestionnaire de clic basique
 		map.on('click', (e: any) => {
@@ -252,9 +212,6 @@
 	onDestroy(() => {
 		if (map) {
 			map.remove();
-		}
-		if (timeSliderContainer) {
-			timeSliderContainer.innerHTML = ``;
 		}
 	});
 
@@ -333,69 +290,79 @@
 	</div>
 {/if}
 
-<div class="map" id="#map_container" bind:this={mapContainer}></div>
-<div class="absolute bottom-1 left-1 max-h-[300px]">
-	<Scale {showScale} {variable} />
-	<SelectedVariables {domain} {variable} />
+<!-- Container de la carte avec contrôles intégrés -->
+<div class="relative w-full h-screen">
+	<div class="map" id="map_container" bind:this={mapContainer}></div>
+
+	<!-- Debug info -->
+	<div class="absolute bottom-1 right-1 z-40 bg-black/70 text-white text-xs p-2 rounded">
+		TimeSelector: {showTimeSelector ? 'VISIBLE' : 'CACHÉ'}
+	</div>
+
+	<!-- Échelle de couleur -->
+	<div class="absolute bottom-1 left-1 max-h-[300px] z-40">
+		<Scale {showScale} {variable} />
+	</div>
 </div>
+
+<!-- Interface épurée - plus de drawer -->
+
+<!-- Dropdowns flottants pour Modèle et Variable -->
+<div class="absolute top-4 right-4 flex flex-col gap-3 pointer-events-auto" style="z-index: 99999;">
+	<!-- Dropdown Modèle -->
+	<div class="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-gray-200" style="z-index: 100001;">
+		<CustomSelect
+			label="Modèle:"
+			options={domains.map(d => ({ value: d.value, label: d.label }))}
+			value={domain.value}
+			placeholder="Choisissez un modèle..."
+			on:change={(e) => {
+				console.log('🔄 [DROPDOWN] Changement modèle vers:', e.detail);
+				const newDomain = domains.find(d => d.value === e.detail) ?? domains[0];
+				domain = newDomain;
+				console.log('🔄 [DROPDOWN] Modèle changé vers:', domain.label);
+				changeOMfileURL();
+			}}
+		/>
+	</div>
+
+	<!-- Dropdown Variable -->
+	<div class="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-gray-200" style="z-index: 100002;">
+		<CustomSelect
+			label="Variable:"
+			options={availableVariables.map(v => ({ value: v.value, label: v.label }))}
+			value={variable.value}
+			placeholder="Choisissez une variable..."
+			on:change={(e) => {
+				console.log('🔄 [DROPDOWN] Changement variable vers:', e.detail);
+				const newVariable = availableVariables.find(v => v.value === e.detail) ?? availableVariables[0];
+				if (newVariable) {
+					variable = newVariable;
+					console.log('🔄 [DROPDOWN] Variable changée vers:', variable.label);
+					changeOMfileURL();
+				}
+			}}
+		/>
+	</div>
+</div>
+<!-- Time Slider Simple -->
 <div
-	class="bg-background/50 absolute bottom-14.5 left-[50%] mx-auto transform-[translate(-50%)] rounded-lg px-4 py-4 {!showTimeSelector
+	class="absolute bottom-4 left-[50%] mx-auto transform-[translate(-50%)] {!showTimeSelector
 		? 'pointer-events-none opacity-0'
 		: 'opacity-100'}"
+	style="z-index: 1000;"
 >
-	<div
-		bind:this={timeSliderContainer}
-		class="time-slider-container flex flex-col items-center gap-0"
-	></div>
+	<SimpleTimeSlider
+		initialDate={timeSelected}
+		resolution={domain.time_interval}
+		disabled={loading}
+		on:change={async (e) => {
+			console.log('🕐 [TIME-SLIDER] Changement de temps:', e.detail);
+			timeSelected = e.detail;
+			url.searchParams.set('time', e.detail.toISOString().replace(/[:Z]/g, '').slice(0, 15));
+			history.pushState({}, '', url);
+			await changeOMfileURL();
+		}}
+	/>
 </div>
-<div class="absolute">
-	<Drawer.Root bind:open={drawerOpen}>
-		<Drawer.Content class="h-1/3">
-			<div class="flex flex-col items-center overflow-y-scroll pb-12">
-				<div class="container mx-auto px-3">
-					<VariableSelection
-						{domain}
-						{variable}
-						{modelRuns}
-						{timeSelected}
-						{latestRequest}
-						{progressRequest}
-						{modelRunSelected}
-						domainChange={(value: string) => {
-							domain = domains.find((dm) => dm.value === value) ?? domains[0];
-							url.searchParams.set('domain', value);
-							pushState(url.toString(), {});
-							toast('Domain set to: ' + domain.label);
-							changeOMfileURL();
-						}}
-						modelRunChange={(mr: Date) => {
-							modelRunSelected = mr;
-							url.searchParams.set('model', mr.toISOString().replace(/[:Z]/g, '').slice(0, 15));
-							pushState(url.toString(), {});
-							toast(
-								'Model run set to: ' +
-									mr.getUTCFullYear() +
-									'-' +
-									pad(mr.getUTCMonth() + 1) +
-									'-' +
-									pad(mr.getUTCDate()) +
-									' ' +
-									pad(mr.getUTCHours()) +
-									':' +
-									pad(mr.getUTCMinutes())
-							);
-							changeOMfileURL();
-						}}
-						variableChange={(value: string) => {
-							variable = variables.find((v) => v.value === value) ?? variables[0];
-							url.searchParams.set('variable', variable.value);
-							pushState(url.toString(), {});
-							toast('Variable set to: ' + variable.label);
-							changeOMfileURL();
-						}}
-					/>
-				</div>
-			</div>
-		</Drawer.Content>
-	</Drawer.Root>
-</div>
+<!-- Interface épurée - plus de drawer -->

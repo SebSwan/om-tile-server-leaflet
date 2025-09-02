@@ -2,7 +2,6 @@
 	import { pad } from '$lib/utils/pad';
 
 	import { domainGroups, domains } from '$lib/utils/domains';
-	import { variables } from '$lib/utils/variables';
 
 	import { Button } from '$lib/components/ui/button';
 
@@ -21,6 +20,7 @@
 		progressRequest;
 		modelRunChange: Function;
 		modelRunSelected: Date;
+		availableVariables: Variable[];
 	}
 	let {
 		domain,
@@ -32,7 +32,8 @@
 		variableChange,
 		progressRequest,
 		modelRunChange,
-		modelRunSelected
+		modelRunSelected,
+		availableVariables
 	}: Props = $props();
 
 	let selectedDomain = $derived(domain.value);
@@ -173,12 +174,8 @@
 							>{variable?.label}</Select.Trigger
 						>
 						<Select.Content side="bottom">
-							{#each latest.variables as vr, i (i)}
-								{#if !vr.startsWith('wind_') || vr === 'wind_gusts_10m'}
-									{@const v = variables.find((vrb) => vrb.value === vr)
-										? variables.find((vrb) => vrb.value === vr)
-										: { value: vr, label: vr }}
-
+							{#each availableVariables as v, i (i)}
+								{#if !v.value.startsWith('wind_') || v.value === 'wind_gusts_10m'}
 									<Select.Item value={v.value}>{v.label}</Select.Item>
 								{/if}
 							{/each}
