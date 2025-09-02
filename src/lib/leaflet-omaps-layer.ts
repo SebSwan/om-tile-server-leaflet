@@ -196,6 +196,12 @@ export async function createOMapsLayerWithWorker(options: OMapsLayerOptions): Pr
             error: error,
             totalTileCreationTime: `${totalTileTime.toFixed(2)}ms (ERREUR)`
           });
+
+          // Amélioration du message d'erreur
+          if (error.message && error.message.includes('File not found')) {
+            console.warn('⚠️ [OMAPS-LAYER] Données non disponibles - utilisation de données antérieures recommandée');
+          }
+
           console.log('🔄 [OMAPS-LAYER] Fallback vers tuile de test');
 
           // Fallback vers tuile de test en cas d'erreur

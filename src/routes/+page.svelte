@@ -22,6 +22,7 @@
 	let partial = $state(false);
 	let showScale = $state(true);
 	let showTimeSelector = $state(true);
+	let dataStatus = $state({ available: true, message: 'Chargement...', referenceTime: '' });
 
 	import '../styles.css';
 	import Scale from '$lib/components/scale/scale.svelte';
@@ -111,7 +112,7 @@
 			mapBounds = map.getBounds();
 			// Le time slider sera désactivé via le composant SimpleTimeSlider
 
-			omUrl = getOMUrl();
+			omUrl = await getOMUrl();
 
 			// Supprimer l'ancienne couche et en créer une nouvelle
 			if (omFileLayer) {
@@ -198,7 +199,15 @@
 
 		// Charger les données du domaine
 			latest = await getDomainData();
-			omUrl = getOMUrl();
+			omUrl = await getOMUrl();
+
+			// Initialiser le statut des données
+			dataStatus = {
+				available: true,
+				message: 'Données actuelles',
+				referenceTime: modelRunSelected.toISOString()
+			};
+
 		await addOmFileLayer();
 
 		// Le time slider sera maintenant géré par le composant SimpleTimeSlider
@@ -215,9 +224,92 @@
 		}
 	});
 
-	const getOMUrl = () => {
+	/**
+	 * 🔍 VALIDATION ET FALLBACK DES DONNÉES MÉTÉO
+	 * Teste plusieurs références temporelles pour trouver des données disponibles
+	 */
+	const findAvailableDataUrl = async (baseModelRun: Date, baseTime: Date, maxRetries = 4): Promise<{ url: string; modelRun: Date; time: Date } | null> => {
+		console.log('🔍 [DATA-VALIDATION] Recherche de données disponibles...');
+
+		const retryHours = [0, -3, -6, -12, -24]; // Heures de retry
+
+		for (let i = 0; i < Math.min(maxRetries, retryHours.length); i++) {
+			const hoursOffset = retryHours[i];
+			const testModelRun = new Date(baseModelRun);
+			testModelRun.setUTCHours(testModelRun.getUTCHours() + hoursOffset);
+
+			const testTime = new Date(baseTime);
+			testTime.setUTCHours(testTime.getUTCHours() + hoursOffset);
+
+			// Construire l'URL de test
+			const testUrl = `https://map-tiles.open-meteo.com/data_spatial/${domain.value}/${testModelRun.getUTCFullYear()}/${pad(testModelRun.getUTCMonth() + 1)}/${pad(testModelRun.getUTCDate())}/${pad(testModelRun.getUTCHours())}00Z/${testTime.getUTCFullYear()}-${pad(testTime.getUTCMonth() + 1)}-${pad(testTime.getUTCDate())}T${pad(testTime.getUTCHours())}00.om`;
+
+			console.log(`🔍 [DATA-VALIDATION] Test ${i + 1}/${maxRetries}: ${testUrl.substring(0, 100)}...`);
+
+			try {
+				const response = await fetch(testUrl, { method: 'HEAD' });
+				if (response.ok) {
+					console.log(`✅ [DATA-VALIDATION] Données trouvées pour ${testModelRun.toISOString()}`);
+					return {
+						url: testUrl,
+						modelRun: testModelRun,
+						time: testTime
+					};
+				}
+			} catch (error) {
+				console.log(`❌ [DATA-VALIDATION] Erreur pour ${testModelRun.toISOString()}:`, error);
+			}
+		}
+
+		console.error('❌ [DATA-VALIDATION] Aucune donnée disponible après tous les retries');
+		return null;
+	};
+
+	const getOMUrl = async () => {
 		if (!mapBounds) return '';
-		return `https://map-tiles.open-meteo.com/data_spatial/${domain.value}/${modelRunSelected.getUTCFullYear()}/${pad(modelRunSelected.getUTCMonth() + 1)}/${pad(modelRunSelected.getUTCDate())}/${pad(modelRunSelected.getUTCHours())}00Z/${timeSelected.getUTCFullYear()}-${pad(timeSelected.getUTCMonth() + 1)}-${pad(timeSelected.getUTCDate())}T${pad(timeSelected.getUTCHours())}00.om?dark=false&variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
+
+		console.log('🔄 [OM-URL] Recherche d\'URL disponible...');
+
+		// Rechercher une URL disponible avec fallback
+		const availableData = await findAvailableDataUrl(modelRunSelected, timeSelected);
+
+		if (!availableData) {
+			console.error('❌ [OM-URL] Aucune donnée disponible');
+			dataStatus = { available: false, message: 'Aucune donnée disponible', referenceTime: '' };
+			toast.error('Aucune donnée météo disponible pour cette période. Veuillez essayer une date antérieure.');
+			return '';
+		}
+
+		// Mettre à jour les dates si nécessaire
+		if (availableData.modelRun.getTime() !== modelRunSelected.getTime()) {
+			console.log('🔄 [OM-URL] Utilisation d\'une référence antérieure:', availableData.modelRun.toISOString());
+			modelRunSelected = availableData.modelRun;
+			dataStatus = {
+				available: true,
+				message: `Utilisation de données antérieures (${availableData.modelRun.toISOString().slice(0, 16).replace('T', ' ')})`,
+				referenceTime: availableData.modelRun.toISOString()
+			};
+		}
+
+		if (availableData.time.getTime() !== timeSelected.getTime()) {
+			console.log('🔄 [OM-URL] Utilisation d\'un temps antérieur:', availableData.time.toISOString());
+			timeSelected = availableData.time;
+		}
+
+		// Mettre à jour le statut si tout est OK
+		if (dataStatus.available && !dataStatus.message) {
+			dataStatus = {
+				available: true,
+				message: 'Données actuelles',
+				referenceTime: availableData.modelRun.toISOString()
+			};
+		}
+
+		// Construire l'URL finale avec les paramètres
+		const finalUrl = `${availableData.url}?dark=false&variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
+
+		console.log('✅ [OM-URL] URL finale construite:', finalUrl.substring(0, 100) + '...');
+		return finalUrl;
 	};
 
 	let colorScale = $derived.by(() => {
@@ -299,6 +391,8 @@
 		TimeSelector: {showTimeSelector ? 'VISIBLE' : 'CACHÉ'}
 	</div>
 
+			<!-- Panneau supprimé - informations intégrées dans le time slider -->
+
 	<!-- Échelle de couleur -->
 	<div class="absolute bottom-1 left-1 max-h-[300px] z-40">
 		<Scale {showScale} {variable} />
@@ -356,6 +450,8 @@
 		initialDate={timeSelected}
 		resolution={domain.time_interval}
 		disabled={loading}
+		modelRunTime={modelRunSelected}
+		dataStatus={dataStatus}
 		on:change={async (e) => {
 			console.log('🕐 [TIME-SLIDER] Changement de temps:', e.detail);
 			timeSelected = e.detail;

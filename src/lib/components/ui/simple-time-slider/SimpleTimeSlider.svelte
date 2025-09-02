@@ -5,12 +5,16 @@
 		initialDate: Date;
 		resolution?: number;
 		disabled?: boolean;
+		modelRunTime?: Date; // Heure du run météo
+		dataStatus?: { available: boolean; message: string; referenceTime?: string }; // Statut des données
 	}
 
 	let {
 		initialDate,
 		resolution = 1,
-		disabled = false
+		disabled = false,
+		modelRunTime,
+		dataStatus
 	}: Props = $props();
 
 	const dispatch = createEventDispatcher<{ change: Date }>();
@@ -94,6 +98,24 @@
 			</span>
 		</div>
 
+		<!-- Statut des données (si disponible) -->
+		{#if dataStatus && dataStatus.message}
+			<div class="text-center">
+				<div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm {dataStatus.message.includes('antérieures') ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : 'bg-green-100 text-green-800 border border-green-200'}">
+					{#if dataStatus.message.includes('antérieures')}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+						</svg>
+					{:else}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+						</svg>
+					{/if}
+					<span class="font-medium">{dataStatus.message}</span>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Contrôles de navigation -->
 		<div class="flex items-center justify-center gap-4">
 			<button
@@ -120,7 +142,11 @@
 		<!-- Slider pour l'heure -->
 		<div class="flex flex-col gap-2">
 			<label for="hour-slider" class="text-sm font-medium text-gray-700">
-				Heure: {pad2(currentHour)}:00
+				{#if modelRunTime}
+					Run {modelRunTime.toISOString().slice(11, 16)}Z → Prévision {pad2(currentHour)}:00
+				{:else}
+					Heure: {pad2(currentHour)}:00
+				{/if}
 			</label>
 			<input
 				id="hour-slider"
