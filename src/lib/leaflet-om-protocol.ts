@@ -44,6 +44,20 @@ const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 console.log('🚀 [LEAFLET-OM] Protocole OM Leaflet initialisé, TILE_SIZE:', TILE_SIZE);
 
 /**
+ * 🧮 Calcul intensité du vent à partir des composantes U/V
+ */
+function computeWindIntensity(u: Float32Array, v: Float32Array): Float32Array {
+  const n = u.length;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const uu = u[i];
+    const vv = v[i];
+    out[i] = Number.isFinite(uu) && Number.isFinite(vv) ? Math.hypot(uu, vv) : NaN;
+  }
+  return out;
+}
+
+/**
  * 📊 INTERFACE POUR LEAFLET
  * Format de retour optimisé pour Canvas HTML
  */
@@ -201,12 +215,40 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 		omapsFileReader.setReaderData(domain, partial);
 		omapsFileReader
 			.init(omUrl)
-			.then(() => {
+			.then(async () => {
 				console.log('✅ [LEAFLET-OM] Reader OMaps initialisé');
-				return omapsFileReader.readVariable(variable, ranges);
-			})
-			.then((variableData) => {
+				// Mode spécial: calculer wind_10m à partir de U/V si demandé
+				if (variable.value === 'wind_10m') {
+					console.log('🌬️ [LEAFLET-OM] Calcul wind_10m à partir de U/V (séquentiel)');
+					try {
+						const uVar = { value: 'wind_u_component_10m', label: 'Wind U Component 10m' } as Variable;
+						const vVar = { value: 'wind_v_component_10m', label: 'Wind V Component 10m' } as Variable;
+						const uData = await omapsFileReader.readVariable(uVar, ranges);
+						const vData = await omapsFileReader.readVariable(vVar, ranges);
+
+						if (uData?.values && vData?.values) {
+							const uArr = uData.values as Float32Array;
+							const vArr = vData.values as Float32Array;
+							const intensity = computeWindIntensity(uArr, vArr);
+							cachedData = { values: intensity };
+							console.log('📊 [LEAFLET-OM] U/V chargés, intensité calculée:', {
+								length: intensity.length,
+								dataType: intensity.constructor.name
+							});
+							return; // terminé via U/V, on sort ici
+						} else {
+							console.warn('⚠️ [LEAFLET-OM] Composantes U/V manquantes, fallback vers wind_10m brut');
+						}
+					} catch (e) {
+						console.warn('⚠️ [LEAFLET-OM] Erreur chargement U/V, fallback vers wind_10m brut:', e);
+					}
+				}
+
+				// Chemin par défaut ou fallback: lire la variable telle quelle
+				const variableData = await omapsFileReader.readVariable(variable, ranges);
 				cachedData = variableData;
+			})
+			.then(() => {
 				console.log('📊 [LEAFLET-OM] Données variables chargées:', {
 					dataLength: cachedData?.values?.length || 0,
 					dataType: cachedData?.values?.constructor?.name || 'undefined'
