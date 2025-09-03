@@ -37,6 +37,9 @@ let ranges: Range[];
 let cachedData: { values: TypedArray | undefined } | null = null;
 let cachedOmUrl = '';
 
+// Déduplication des initialisations par URL
+const initPromisesByUrl: Map<string, Promise<void>> = new Map();
+
 setupGlobalCache();
 
 const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
@@ -69,6 +72,34 @@ export interface LeafletTileData {
 }
 
 /**
+ * Déduplication + retry simple pour init
+ */
+async function initOMFileForLeafletDedup(fullUrl: string): Promise<void> {
+  if (initPromisesByUrl.has(fullUrl)) {
+    return initPromisesByUrl.get(fullUrl)!;
+  }
+
+  const attempt = async (retry: number): Promise<void> => {
+    try {
+      await initOMFileForLeaflet(fullUrl);
+    } catch (e) {
+      if (retry > 0) {
+        console.warn('⏳ [LEAFLET-OM] init retry après erreur:', e);
+        await new Promise((r) => setTimeout(r, 200));
+        return attempt(retry - 1);
+      }
+      throw e;
+    }
+  };
+
+  const p = attempt(1).finally(() => {
+    initPromisesByUrl.delete(fullUrl);
+  });
+  initPromisesByUrl.set(fullUrl, p);
+  return p;
+}
+
+/**
  * 🎯 FONCTION PRINCIPALE : getTileForLeaflet()
  *
  * OBJECTIF : Générer une tuile Canvas pour des coordonnées Leaflet
@@ -92,12 +123,12 @@ export async function getTileForLeaflet(
 		totalStart: totalTileStart
 	});
 
-	// 🔄 Initialiser les données OM si nécessaire
+	// 🔄 Initialiser les données OM si nécessaire (avec dédup + retry léger)
 	let dataLoadTime = 0;
 	if (cachedOmUrl !== omUrl || !cachedData) {
 		const dataLoadStart = performance.now();
 		console.log('📂 [LEAFLET-OM] Chargement des données OM (cache miss)');
-		await initOMFileForLeaflet(omUrl);
+		await initOMFileForLeafletDedup(omUrl);
 		dataLoadTime = performance.now() - dataLoadStart;
 		console.log('✅ [LEAFLET-OM] Données OM chargées:', `${dataLoadTime.toFixed(2)}ms`);
 		cachedOmUrl = omUrl;
@@ -223,8 +254,10 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 					try {
 						const uVar = { value: 'wind_u_component_10m', label: 'Wind U Component 10m' } as Variable;
 						const vVar = { value: 'wind_v_component_10m', label: 'Wind V Component 10m' } as Variable;
-						const uData = await omapsFileReader.readVariable(uVar, ranges);
-						const vData = await omapsFileReader.readVariable(vVar, ranges);
+						const [uData, vData] = await Promise.all([
+							omapsFileReader.readVariable(uVar, ranges),
+							omapsFileReader.readVariable(vVar, ranges)
+						]);
 
 						if (uData?.values && vData?.values) {
 							const uArr = uData.values as Float32Array;
@@ -244,9 +277,11 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 					}
 				}
 
-				// Chemin par défaut ou fallback: lire la variable telle quelle
-				const variableData = await omapsFileReader.readVariable(variable, ranges);
-				cachedData = variableData;
+				// Chemin par défaut ou fallback: lire la variable telle quelle (si non déjà calculée)
+				if (!cachedData || !cachedData.values) {
+					const variableData = await omapsFileReader.readVariable(variable, ranges);
+					cachedData = variableData;
+				}
 			})
 			.then(() => {
 				console.log('📊 [LEAFLET-OM] Données variables chargées:', {
