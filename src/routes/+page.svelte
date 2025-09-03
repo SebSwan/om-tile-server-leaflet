@@ -402,7 +402,7 @@
 <!-- Interface épurée - plus de drawer -->
 
 <!-- Dropdowns flottants pour Modèle et Variable -->
-<div class="absolute top-4 right-4 flex flex-col gap-3 pointer-events-auto" style="z-index: 99999;">
+<div class="absolute top-4 right-4 flex flex-row gap-3 pointer-events-auto" style="z-index: 99999;">
 	<!-- Dropdown Modèle -->
 	<div class="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-gray-200" style="z-index: 100001;">
 		<CustomSelect
