@@ -35,6 +35,7 @@
 
 	// Leaflet layer management
 	let omFileLayer: any = null;
+	let windArrowsLayer: any = null;
 
 			const addOmFileLayer = async () => {
 		if (!map || !omUrl) return;
@@ -45,8 +46,8 @@
 			variable: variable.value
 		});
 
-		// Import de la couche OMaps avec worker
-		const { createOMapsLayerWithWorker } = await import('$lib/leaflet-omaps-layer');
+		// Import des couches avec worker
+		const { createOMapsLayerWithWorker, createWindArrowsLayerWithWorker } = await import('$lib/leaflet-omaps-layer');
 
 		// Créer la couche OMaps avec vraies données météo
 		omFileLayer = await createOMapsLayerWithWorker({
@@ -62,6 +63,18 @@
 		omFileLayer.addTo(map);
 
 		console.log('🗺️ [PAGE] Couche OMaps ajoutée à la carte Leaflet');
+
+		// Ajouter la couche de flèches si variable vent moyenne
+		if (variable.value === 'wind_10m') {
+			windArrowsLayer = await createWindArrowsLayerWithWorker({
+				omUrl: omUrl,
+				domain: domain,
+				variable: variable,
+				opacity: 1
+			});
+			windArrowsLayer.addTo(map);
+			console.log('🧭 [PAGE] Couche flèches ajoutée');
+		}
 	};
 
 	// Leaflet map variables
@@ -116,9 +129,13 @@
 
 			omUrl = await getOMUrl();
 
-			// Supprimer l'ancienne couche et en créer une nouvelle
+			// Supprimer les anciennes couches et en créer de nouvelles
 			if (omFileLayer) {
 				map.removeLayer(omFileLayer);
+			}
+			if (windArrowsLayer) {
+				map.removeLayer(windArrowsLayer);
+				windArrowsLayer = null;
 			}
 
 			await addOmFileLayer();
@@ -433,7 +450,7 @@
 					const referenceTime = json.reference_time;
 					modelRunSelected = new Date(referenceTime);
 
-					if (modelRunSelected - timeSelected > 0) {
+					if (modelRunSelected.getTime() - timeSelected.getTime() > 0) {
 						timeSelected = new Date(referenceTime);
 					}
 				}
@@ -447,8 +464,8 @@
 	let progressRequest = $derived(getDomainData(false));
 
 	let modelRuns = $derived.by(() => {
-		if (latest) {
-			let referenceTime = new Date(latest.reference_time);
+		if (latest && (latest as any).reference_time) {
+			let referenceTime = new Date((latest as any).reference_time);
 			let returnArray = [
 				...Array(Math.round(referenceTime.getUTCHours() / domain.model_interval + 1))
 			].map((_, i) => {

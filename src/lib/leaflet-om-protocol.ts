@@ -41,6 +41,28 @@ let cachedWindUV: { u: TypedArray; v: TypedArray } | null = null;
 // Déduplication des initialisations par URL
 const initPromisesByUrl: Map<string, Promise<void>> = new Map();
 
+// Limitation de concurrence pour les tuiles flèches (éviter surcharge mémoire/CPU)
+let arrowsActive = 0;
+const ARROWS_MAX_CONCURRENCY = 3;
+const arrowsQueue: Array<() => void> = [];
+
+function acquireArrowsSlot(): Promise<void> {
+  if (arrowsActive < ARROWS_MAX_CONCURRENCY) {
+    arrowsActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => arrowsQueue.push(() => {
+    arrowsActive++;
+    resolve();
+  }));
+}
+
+function releaseArrowsSlot(): void {
+  arrowsActive = Math.max(0, arrowsActive - 1);
+  const next = arrowsQueue.shift();
+  if (next) next();
+}
+
 setupGlobalCache();
 
 const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
@@ -202,8 +224,13 @@ export async function getTileForLeafletArrows(
     const tileBounds = getTileBounds(coords);
 
     // Générer via worker
-    const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize);
-    return tileResult;
+    await acquireArrowsSlot();
+    try {
+        const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize);
+        return tileResult;
+    } finally {
+        releaseArrowsSlot();
+    }
 }
 
 /**
@@ -542,10 +569,10 @@ async function generateArrowsTileWithWorker(
 
         // Timeout
         const workerTimeout = setTimeout(() => {
-            console.warn('⏰ [LEAFLET-OM] TIMEOUT worker flèches après 10s');
+            console.warn('⏰ [LEAFLET-OM] TIMEOUT worker flèches après 8s');
             worker.terminate();
-            reject(new Error('Worker timeout (arrows) after 10 seconds'));
-        }, 10000);
+            reject(new Error('Worker timeout (arrows) after 8 seconds'));
+        }, 8000);
 
         worker.onmessage = (message) => {
             clearTimeout(workerTimeout);

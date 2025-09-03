@@ -158,13 +158,20 @@ self.onmessage = async (message) => {
 				if (typeof gridSize === 'number' && gridSize > 0) return gridSize;
 				if (z <= 4) return 8;
 				if (z <= 7) return 12;
-				if (z <= 10) return 16;
-				return 20;
+				if (z <= 10) return 14;
+				return 16;
 			})();
 
 			const step = TILE_SIZE / samples;
 			const ctxWidth = TILE_SIZE;
 			const ctxHeight = TILE_SIZE;
+
+			// Alignement global (monde) et marge de débord
+			const worldX0 = x * TILE_SIZE;
+			const worldY0 = y * TILE_SIZE;
+			const phaseX = ((step / 2 - (worldX0 % step)) + step) % step;
+			const phaseY = ((step / 2 - (worldY0 % step)) + step) % step;
+			const margin = Math.min(12, Math.max(6, Math.floor(step * 0.5)));
 
 			const drawLine = (x0: number, y0: number, x1: number, y1: number) => {
 				const dx = Math.abs(Math.round(x1) - Math.round(x0));
@@ -206,13 +213,12 @@ self.onmessage = async (message) => {
 				drawLine(x2, y2, xr, yr);
 			};
 
-			for (let i = 0; i < samples; i++) {
-				for (let j = 0; j < samples; j++) {
-					const px = j * step + step / 2;
-					const py = i * step + step / 2;
+			// Boucles alignées et débordantes (clip implicite par canvas)
+			for (let py = -margin + phaseY; py < TILE_SIZE + margin; py += step) {
+				for (let px = -margin + phaseX; px < TILE_SIZE + margin; px += step) {
 
-					const lat = tile2lat(y + py / TILE_SIZE, z);
-					const lon = tile2lon(x + px / TILE_SIZE, z);
+					const lat = tile2lat(y + (py / TILE_SIZE), z);
+					const lon = tile2lon(x + (px / TILE_SIZE), z);
 
 					const { index, xFraction, yFraction } = getIndexAndFractions(
 						lat,
