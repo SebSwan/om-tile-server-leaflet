@@ -262,7 +262,7 @@ async function generateTileWithWorker(
 			values: cachedData.values // Extraire seulement les valeurs TypedArray
 		} : null;
 
-		const workerMessage = { 
+		const workerMessage = {
 			type: 'GT',
 			x: coords.x,
 			y: coords.y,
@@ -409,4 +409,6 @@ export function clearOMCache(): void {
 		omapsFileReader.dispose();
 	}
 }
+
+
 

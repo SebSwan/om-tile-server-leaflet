@@ -7,13 +7,15 @@
 	// Import Leaflet (sera importé dynamiquement dans onMount pour éviter SSR)
 	import 'leaflet/dist/leaflet.css';
 
-	// import { omProtocol, getValueFromLatLong } from '../om-protocol'; // TODO: Adapter pour Leaflet
+	// Import de la fonction pour récupérer les valeurs météo depuis la couleur
+	import { getValueFromPixelColor } from '$lib/leaflet-om-protocol';
+	import { getValueFromColorScale } from '$lib/utils/color-to-value';
+	import { getColorScale } from '$lib/utils/color-scales';
 	import { pad } from '$lib/utils/pad';
 	import { domains } from '$lib/utils/domains';
 	import { hideZero, variables } from '$lib/utils/variables';
 
 	import type { Variable, Domain } from '$lib/types';
-	import { getColorScale } from '$lib/utils/color-scales';
 
 	// Import utilitaires Leaflet
 	import { loadLeaflet, createLeafletMap } from '$lib/leaflet-utils';
@@ -28,6 +30,7 @@
 	import Scale from '$lib/components/scale/scale.svelte';
 	import { CustomSelect } from '$lib/components/ui/custom-select';
 	import { SimpleTimeSlider } from '$lib/components/ui/simple-time-slider';
+	import { SimpleWeatherPopup } from '$lib/components/simple-weather-popup';
 
 	// Le time slider est maintenant géré par le composant SimpleTimeSlider
 
@@ -179,6 +182,12 @@
 
 	let showPopup = false;
 
+	// Variables pour le popup météo simple au passage de la souris
+	let simplePopupVisible = $state(false);
+	let simplePopupX = $state(0);
+	let simplePopupY = $state(0);
+	let simplePopupValue = $state('');
+
 	onMount(async () => {
 		// Import Leaflet dynamiquement pour éviter les problèmes SSR
 		const L = await loadLeaflet();
@@ -212,10 +221,109 @@
 
 		// Le time slider sera maintenant géré par le composant SimpleTimeSlider
 
-		// Gestionnaire de clic basique
+		// Gestionnaire de clic basique (supprimé car remplacé par le gestionnaire de coordonnées)
+
+				// 🎯 GESTIONNAIRE POUR AFFICHER LES COORDONNÉES ET LA COULEUR AU CLIC
 		map.on('click', (e: any) => {
-			showPopup = !showPopup;
-			console.log('Map clicked at:', e.latlng);
+			const lat = e.latlng.lat;
+			const lng = e.latlng.lng;
+
+			// Formater les coordonnées avec 6 décimales
+			const latFormatted = lat.toFixed(6);
+			const lngFormatted = lng.toFixed(6);
+
+			// Capturer la couleur du pixel à la position cliquée
+			let colorInfo = '';
+			try {
+				console.log('🔍 [DEBUG] Vérification couche météo:', {
+					omFileLayer: !!omFileLayer,
+					hasTiles: !!(omFileLayer && omFileLayer._tiles),
+					tilesCount: omFileLayer ? Object.keys(omFileLayer._tiles || {}).length : 0
+				});
+
+				if (omFileLayer && omFileLayer._tiles) {
+					// Afficher les clés de tuiles disponibles pour le débogage
+					const availableTileKeys = Object.keys(omFileLayer._tiles);
+					console.log('🔍 [DEBUG] Tuiles disponibles:', availableTileKeys.slice(0, 10)); // Afficher les 10 premières
+
+										// Utiliser la méthode Leaflet pour obtenir les coordonnées de tuile
+					const zoom = map.getZoom();
+					const point = map.project(e.latlng, zoom);
+					const tileCoords = {
+						x: Math.floor(point.x / 256),
+						y: Math.floor(point.y / 256),
+						z: zoom
+					};
+
+					console.log('🔍 [DEBUG] Recherche tuile:', {
+						clickPoint: e.latlng,
+						zoom: zoom,
+						projectedPoint: point,
+						tileCoords: tileCoords,
+						availableKeys: availableTileKeys.slice(0, 5)
+					});
+
+					// Chercher la tuile dans le cache avec le bon format de clé (x:y:z)
+					const tileKey = `${tileCoords.x}:${tileCoords.y}:${tileCoords.z}`;
+					const tile = omFileLayer._tiles[tileKey];
+
+					console.log('🔍 [DEBUG] Tuile trouvée:', {
+						tileKey: tileKey,
+						tile: !!tile,
+						tileEl: !!(tile && tile.el),
+						tileElType: tile && tile.el ? tile.el.tagName : 'N/A'
+					});
+
+										if (tile && tile.el && tile.el.tagName === 'CANVAS') {
+						const canvas = tile.el;
+						const ctx = canvas.getContext('2d');
+
+						if (ctx) {
+							// Calculer la position relative dans la tuile
+							const projectedPoint = map.project(e.latlng);
+							const tileSize = 256;
+							const tilePoint = {
+								x: Math.floor(projectedPoint.x % tileSize),
+								y: Math.floor(projectedPoint.y % tileSize)
+							};
+
+							console.log('🔍 [DEBUG] Position dans tuile:', tilePoint);
+
+														// Capturer la couleur du pixel
+							const imageData = ctx.getImageData(tilePoint.x, tilePoint.y, 1, 1);
+							const [r, g, b, a] = imageData.data;
+
+														// Formater la couleur RGBA
+							colorInfo = `\nCouleur: rgba(${r}, ${g}, ${b}, ${(a/255).toFixed(2)})`;
+
+							// Convertir la couleur en valeur météo avec l'échelle précise
+							const weatherValue = getValueFromColorScale(r, g, b, a, variable);
+							colorInfo += `\n${variable.label}: ${weatherValue}`;
+
+							console.log('🎨 [CLICK] Couleur pixel:', { r, g, b, a, tileCoords, tilePoint, weatherValue });
+						}
+					} else {
+						console.log('⚠️ [DEBUG] Tuile non disponible ou pas un canvas');
+						colorInfo = '\nCouleur: Tuile non disponible';
+					}
+				} else {
+					console.log('⚠️ [DEBUG] Pas de couche météo ou pas de tuiles');
+					colorInfo = '\nCouleur: Pas de données météo';
+				}
+			} catch (error) {
+				console.warn('⚠️ Erreur lors de la capture de couleur:', error);
+				colorInfo = '\nCouleur: Erreur de capture';
+			}
+
+			// Mettre à jour le popup avec les coordonnées et la couleur
+			simplePopupValue = `Lat: ${latFormatted}°\nLng: ${lngFormatted}°${colorInfo}`;
+			simplePopupVisible = true;
+
+			// Positionner le popup à la position du clic
+			simplePopupX = e.originalEvent.clientX;
+			simplePopupY = e.originalEvent.clientY;
+
+			console.log('🗺️ [CLICK] Coordonnées cliquées:', { lat: latFormatted, lng: lngFormatted });
 		});
 	});
 	onDestroy(() => {
@@ -461,4 +569,14 @@
 		}}
 	/>
 </div>
+
+<!-- 🎯 POPUP MÉTÉO SIMPLE AU PASSAGE DE LA SOURIS -->
+<SimpleWeatherPopup
+	visible={simplePopupVisible}
+	x={simplePopupX}
+	y={simplePopupY}
+	value={simplePopupValue}
+	variable={variable.value}
+/>
+
 <!-- Interface épurée - plus de drawer -->
