@@ -140,11 +140,17 @@ self.onmessage = async (message) => {
 			const uValues = message.data.data?.u as Float32Array;
 			const vValues = message.data.data?.v as Float32Array;
 
-			const pixels = TILE_SIZE * TILE_SIZE;
-			const rgba = new Uint8ClampedArray(pixels * 4);
-
-			// Couleur des flèches selon l'intensité (même palette que vent)
-			const arrowColorScale = getColorScale({ value: 'wind', label: 'Wind' } as unknown as { value: string; label: string });
+			// Canvas hors-écran pour un rendu anti-crénelé des flèches
+			const offscreen = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
+			const ctx = offscreen.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+			if (!ctx) {
+				// Fallback en cas d'absence de contexte (rare)
+				const pixels = TILE_SIZE * TILE_SIZE;
+				const rgba = new Uint8ClampedArray(pixels * 4);
+				postMessage({ type: 'RT', rgba, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: 0 });
+				self.close();
+				return;
+			}
 
 			let projectionGrid = null;
 			if (domain.grid.projection) {
@@ -166,8 +172,8 @@ self.onmessage = async (message) => {
 			})();
 
 			const step = TILE_SIZE / samples;
-			const ctxWidth = TILE_SIZE;
-			const ctxHeight = TILE_SIZE;
+			// const ctxWidth = TILE_SIZE;
+			// const ctxHeight = TILE_SIZE;
 
 			// Alignement global (monde) et marge de débord
 			const worldX0 = x * TILE_SIZE;
@@ -176,80 +182,43 @@ self.onmessage = async (message) => {
 			const phaseY = ((step / 2 - (worldY0 % step)) + step) % step;
 			const margin = Math.min(12, Math.max(6, Math.floor(step * 0.5)));
 
-			const setPixel = (x: number, y: number, r: number, g: number, b: number, a: number) => {
-				if (x < 0 || x >= ctxWidth || y < 0 || y >= ctxHeight) return;
-				const ind = (y * ctxWidth + x) * 4;
-				rgba[ind] = r;
-				rgba[ind + 1] = g;
-				rgba[ind + 2] = b;
-				rgba[ind + 3] = a;
-			};
+			// Style B: configuration de rendu
+			ctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+			ctx.lineCap = 'round';
+			ctx.lineJoin = 'round';
+			ctx.miterLimit = 2;
+			ctx.shadowColor = 'rgba(255,255,255,0.6)';
+			ctx.shadowBlur = 0.8;
+			ctx.shadowOffsetX = 0;
+			ctx.shadowOffsetY = 0;
 
-			const drawCircle = (cx: number, cy: number, radius: number, r: number, g: number, b: number, a: number) => {
-				const r2 = radius * radius;
-				const minX = Math.max(0, Math.floor(cx - radius));
-				const maxX = Math.min(ctxWidth - 1, Math.ceil(cx + radius));
-				const minY = Math.max(0, Math.floor(cy - radius));
-				const maxY = Math.min(ctxHeight - 1, Math.ceil(cy + radius));
-				for (let yy = minY; yy <= maxY; yy++) {
-					for (let xx = minX; xx <= maxX; xx++) {
-						const dx = xx - cx;
-						const dy = yy - cy;
-						if (dx * dx + dy * dy <= r2) {
-							setPixel(xx, yy, r, g, b, a);
-						}
-					}
-				}
-			};
-
-			const drawThickLine = (
-				x0: number,
-				y0: number,
-				x1: number,
-				y1: number,
-				radius: number,
-				r: number,
-				g: number,
-				b: number,
-				a: number
-			) => {
-				const dx = x1 - x0;
-				const dy = y1 - y0;
-				const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
-				for (let s = 0; s <= steps; s++) {
-					const t = s / steps;
-					const xx = x0 + dx * t;
-					const yy = y0 + dy * t;
-					drawCircle(xx, yy, radius, r, g, b, a);
-				}
-			};
-
-			const drawArrowAt = (cx: number, cy: number, angle: number, length: number, colorRGB: number[]) => {
+			const drawArrowAt = (cx: number, cy: number, angle: number, length: number, speed: number) => {
 				const x2 = cx + Math.cos(angle) * length;
 				const y2 = cy + Math.sin(angle) * length;
-				const head = Math.max(3, Math.floor(length * 0.25));
-				const leftAngle = angle + Math.PI * 0.75;
-				const rightAngle = angle - Math.PI * 0.75;
+				const head = Math.max(3, Math.floor(length * 0.35));
+				// Épaisseur modulée par densité et vitesse
+				const baseWidth = Math.max(1.2, Math.min(2.0, step * 0.10));
+				ctx.lineWidth = Math.min(3.0, baseWidth + Math.min(1.0, speed * 0.06));
+				ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+				ctx.fillStyle = 'rgba(0,0,0,0.85)';
+
+				ctx.beginPath();
+				ctx.moveTo(cx, cy);
+				ctx.lineTo(x2, y2);
+				ctx.stroke();
+
+				const leftAngle = angle + Math.PI * 0.82;
+				const rightAngle = angle - Math.PI * 0.82;
 				const xl = x2 + Math.cos(leftAngle) * head;
 				const yl = y2 + Math.sin(leftAngle) * head;
 				const xr = x2 + Math.cos(rightAngle) * head;
 				const yr = y2 + Math.sin(rightAngle) * head;
-
-				const rMain = Math.max(1.2, Math.min(2.0, step / 14));
-				const rHalo = rMain + 0.8;
-				// halo contrasté (blanc si flèche sombre, sinon noir)
-				const lum = 0.299 * colorRGB[0] + 0.587 * colorRGB[1] + 0.114 * colorRGB[2];
-				const haloRGB = lum < 140 ? [255, 255, 255] : [0, 0, 0];
-
-				// Halo d'abord
-				drawThickLine(cx, cy, x2, y2, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
-				drawThickLine(x2, y2, xl, yl, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
-				drawThickLine(x2, y2, xr, yr, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
-
-				// Flèche principale colorée
-				drawThickLine(cx, cy, x2, y2, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
-				drawThickLine(x2, y2, xl, yl, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
-				drawThickLine(x2, y2, xr, yr, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
+				ctx.beginPath();
+				ctx.moveTo(x2, y2);
+				ctx.lineTo(xl, yl);
+				ctx.lineTo(xr, yr);
+				ctx.closePath();
+				ctx.fill();
 			};
 
 			// Boucles alignées et débordantes (clip implicite par canvas)
@@ -288,18 +257,18 @@ self.onmessage = async (message) => {
 					// Angle carte (y vers le bas)
 					const angle = -Math.atan2(u, v);
 					const length = Math.min(18, Math.max(6, speed * 2.0));
-					const colorRGB = getColor(arrowColorScale, speed);
-					drawArrowAt(px, py, angle, length, colorRGB);
+					drawArrowAt(px, py, angle, length, speed);
 				}
 			}
 
 			const workerProcessingEnd = performance.now();
 			const totalProcessingTime = workerProcessingEnd - workerProcessingStart;
 
+			const imageData = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
 			if (outputFormat === 'leaflet') {
-				postMessage({ type: 'RT', rgba, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: totalProcessingTime });
+				postMessage({ type: 'RT', rgba: imageData.data, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: totalProcessingTime });
 			} else {
-				const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
+				const tile = await createImageBitmap(imageData);
 				postMessage({ type: 'RT', tile, key, processingTime: totalProcessingTime });
 			}
 
