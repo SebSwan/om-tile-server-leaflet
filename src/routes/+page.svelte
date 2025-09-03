@@ -8,7 +8,6 @@
 	import 'leaflet/dist/leaflet.css';
 
 	// Import de la fonction pour récupérer les valeurs météo depuis la couleur
-	import { getValueFromPixelColor } from '$lib/leaflet-om-protocol';
 	import { getValueFromColorScale } from '$lib/utils/color-to-value';
 	import { getColorScale } from '$lib/utils/color-scales';
 	import { pad } from '$lib/utils/pad';

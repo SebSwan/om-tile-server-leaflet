@@ -175,9 +175,9 @@
 						>
 						<Select.Content side="bottom">
 							{#each availableVariables as v, i (i)}
-								{#if !v.value.startsWith('wind_') || v.value === 'wind_gusts_10m'}
+								
 									<Select.Item value={v.value}>{v.label}</Select.Item>
-								{/if}
+
 							{/each}
 						</Select.Content>
 						<Select.Label class="absolute top-0 left-2 z-10 px-1 text-xs">Variable</Select.Label>

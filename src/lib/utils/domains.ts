@@ -269,7 +269,9 @@ export const domains: Array<Domain> = [
 			'wind_80m',
 			'wind_120m',
 			'wind_180m',
-			'wind_gusts_10m'
+			'wind_gusts_10m',
+      'wind_u_component_10m',
+      'wind_v_component_10m',
 		],
 		windUVComponents: true
 	},

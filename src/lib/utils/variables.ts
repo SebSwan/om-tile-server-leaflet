@@ -69,7 +69,10 @@ export const variables = [
 	{ value: 'soil_moisture_3_to_9cm', label: 'Soil Moisture (3-9 cm)' },
 	{ value: 'soil_moisture_7_to_28cm', label: 'Soil Moisture (7-28 cm)' },
 	{ value: 'soil_moisture_9_to_27cm', label: 'Soil Moisture (9-27 cm)' },
-	{ value: 'soil_moisture_27_to_81cm', label: 'Soil Moisture (27-81 cm)' }
+	{ value: 'soil_moisture_27_to_81cm', label: 'Soil Moisture (27-81 cm)' },
+  { value: 'wind_u_component_10m', label: 'Wind U Component 10m' },
+  { value: 'wind_v_component_10m', label: 'Wind V Component 10m' },
+  { value: 'wind_10m', label: 'Average Wind 10m' },
 ];
 
 for (const pl of pressureLevels) {
