@@ -143,6 +143,9 @@ self.onmessage = async (message) => {
 			const pixels = TILE_SIZE * TILE_SIZE;
 			const rgba = new Uint8ClampedArray(pixels * 4);
 
+			// Couleur des flèches selon l'intensité (même palette que vent)
+			const arrowColorScale = getColorScale({ value: 'wind', label: 'Wind' } as unknown as { value: string; label: string });
+
 			let projectionGrid = null;
 			if (domain.grid.projection) {
 				const projectionName = domain.grid.projection.name;
@@ -173,32 +176,55 @@ self.onmessage = async (message) => {
 			const phaseY = ((step / 2 - (worldY0 % step)) + step) % step;
 			const margin = Math.min(12, Math.max(6, Math.floor(step * 0.5)));
 
-			const drawLine = (x0: number, y0: number, x1: number, y1: number) => {
-				const dx = Math.abs(Math.round(x1) - Math.round(x0));
-				const dy = Math.abs(Math.round(y1) - Math.round(y0));
-				const sx = Math.round(x0) < Math.round(x1) ? 1 : -1;
-				const sy = Math.round(y0) < Math.round(y1) ? 1 : -1;
-				let err = dx - dy;
-				let xCur = Math.round(x0);
-				let yCur = Math.round(y0);
-				const xEnd = Math.round(x1);
-				const yEnd = Math.round(y1);
-				while (true) {
-					if (xCur >= 0 && xCur < ctxWidth && yCur >= 0 && yCur < ctxHeight) {
-						const ind = (yCur * ctxWidth + xCur) * 4;
-						rgba[ind] = 0;
-						rgba[ind + 1] = 0;
-						rgba[ind + 2] = 0;
-						rgba[ind + 3] = 200; // alpha
+			const setPixel = (x: number, y: number, r: number, g: number, b: number, a: number) => {
+				if (x < 0 || x >= ctxWidth || y < 0 || y >= ctxHeight) return;
+				const ind = (y * ctxWidth + x) * 4;
+				rgba[ind] = r;
+				rgba[ind + 1] = g;
+				rgba[ind + 2] = b;
+				rgba[ind + 3] = a;
+			};
+
+			const drawCircle = (cx: number, cy: number, radius: number, r: number, g: number, b: number, a: number) => {
+				const r2 = radius * radius;
+				const minX = Math.max(0, Math.floor(cx - radius));
+				const maxX = Math.min(ctxWidth - 1, Math.ceil(cx + radius));
+				const minY = Math.max(0, Math.floor(cy - radius));
+				const maxY = Math.min(ctxHeight - 1, Math.ceil(cy + radius));
+				for (let yy = minY; yy <= maxY; yy++) {
+					for (let xx = minX; xx <= maxX; xx++) {
+						const dx = xx - cx;
+						const dy = yy - cy;
+						if (dx * dx + dy * dy <= r2) {
+							setPixel(xx, yy, r, g, b, a);
+						}
 					}
-					if (xCur === xEnd && yCur === yEnd) break;
-					const e2 = 2 * err;
-					if (e2 > -dy) { err -= dy; xCur += sx; }
-					if (e2 < dx) { err += dx; yCur += sy; }
 				}
 			};
 
-			const drawArrowAt = (cx: number, cy: number, angle: number, length: number) => {
+			const drawThickLine = (
+				x0: number,
+				y0: number,
+				x1: number,
+				y1: number,
+				radius: number,
+				r: number,
+				g: number,
+				b: number,
+				a: number
+			) => {
+				const dx = x1 - x0;
+				const dy = y1 - y0;
+				const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
+				for (let s = 0; s <= steps; s++) {
+					const t = s / steps;
+					const xx = x0 + dx * t;
+					const yy = y0 + dy * t;
+					drawCircle(xx, yy, radius, r, g, b, a);
+				}
+			};
+
+			const drawArrowAt = (cx: number, cy: number, angle: number, length: number, colorRGB: number[]) => {
 				const x2 = cx + Math.cos(angle) * length;
 				const y2 = cy + Math.sin(angle) * length;
 				const head = Math.max(3, Math.floor(length * 0.25));
@@ -208,9 +234,22 @@ self.onmessage = async (message) => {
 				const yl = y2 + Math.sin(leftAngle) * head;
 				const xr = x2 + Math.cos(rightAngle) * head;
 				const yr = y2 + Math.sin(rightAngle) * head;
-				drawLine(cx, cy, x2, y2);
-				drawLine(x2, y2, xl, yl);
-				drawLine(x2, y2, xr, yr);
+
+				const rMain = Math.max(1.2, Math.min(2.0, step / 14));
+				const rHalo = rMain + 0.8;
+				// halo contrasté (blanc si flèche sombre, sinon noir)
+				const lum = 0.299 * colorRGB[0] + 0.587 * colorRGB[1] + 0.114 * colorRGB[2];
+				const haloRGB = lum < 140 ? [255, 255, 255] : [0, 0, 0];
+
+				// Halo d'abord
+				drawThickLine(cx, cy, x2, y2, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
+				drawThickLine(x2, y2, xl, yl, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
+				drawThickLine(x2, y2, xr, yr, rHalo, haloRGB[0], haloRGB[1], haloRGB[2], 120);
+
+				// Flèche principale colorée
+				drawThickLine(cx, cy, x2, y2, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
+				drawThickLine(x2, y2, xl, yl, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
+				drawThickLine(x2, y2, xr, yr, rMain, colorRGB[0], colorRGB[1], colorRGB[2], 210);
 			};
 
 			// Boucles alignées et débordantes (clip implicite par canvas)
@@ -249,7 +288,8 @@ self.onmessage = async (message) => {
 					// Angle carte (y vers le bas)
 					const angle = -Math.atan2(u, v);
 					const length = Math.min(18, Math.max(6, speed * 2.0));
-					drawArrowAt(px, py, angle, length);
+					const colorRGB = getColor(arrowColorScale, speed);
+					drawArrowAt(px, py, angle, length, colorRGB);
 				}
 			}
 
