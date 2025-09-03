@@ -36,6 +36,7 @@ let ranges: Range[];
 // Cache des données pour éviter les rechargements
 let cachedData: { values: TypedArray | undefined } | null = null;
 let cachedOmUrl = '';
+let cachedWindUV: { u: TypedArray; v: TypedArray } | null = null;
 
 // Déduplication des initialisations par URL
 const initPromisesByUrl: Map<string, Promise<void>> = new Map();
@@ -158,6 +159,51 @@ export async function getTileForLeaflet(
 	});
 
 	return tileResult;
+}
+
+/**
+ * 🎯 Tuile de flèches pour Leaflet (overlay transparent)
+ */
+export async function getTileForLeafletArrows(
+    coords: TileIndex,
+    omUrl: string,
+    gridSize?: number
+): Promise<LeafletTileData> {
+    const totalTileStart = performance.now();
+    console.log('🎯 [LEAFLET-OM] getTileForLeafletArrows() appelée:', {
+        coords: coords,
+        omUrl: omUrl.substring(0, 100) + '...',
+        cacheHit: cachedOmUrl === omUrl && !!cachedWindUV,
+        totalStart: totalTileStart
+    });
+
+    // S'assurer que l'OM est initialisé (dédup + retry)
+    if (cachedOmUrl !== omUrl || !omapsFileReader) {
+        await initOMFileForLeafletDedup(omUrl);
+        cachedOmUrl = omUrl;
+    }
+
+    // Charger U/V si non présents dans le cache
+    if (!cachedWindUV || !cachedWindUV.u || !cachedWindUV.v) {
+        console.log('📂 [LEAFLET-OM] Chargement U/V pour flèches (cache miss)');
+        const uVar = { value: 'wind_u_component_10m', label: 'Wind U Component 10m' } as Variable;
+        const vVar = { value: 'wind_v_component_10m', label: 'Wind V Component 10m' } as Variable;
+        const [uData, vData] = await Promise.all([
+            omapsFileReader.readVariable(uVar, ranges),
+            omapsFileReader.readVariable(vVar, ranges)
+        ]);
+        if (!uData?.values || !vData?.values) {
+            throw new Error('U/V values not available for arrows');
+        }
+        cachedWindUV = { u: uData.values, v: vData.values };
+    }
+
+    // Bounds de la tuile
+    const tileBounds = getTileBounds(coords);
+
+    // Générer via worker
+    const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize);
+    return tileResult;
 }
 
 /**
@@ -445,6 +491,90 @@ async function generateTileWithWorker(
 			reject(error);
 		}
 	});
+}
+
+/**
+ * 🔧 Génération tuile flèches avec Worker (overlay transparent)
+ */
+async function generateArrowsTileWithWorker(
+    coords: TileIndex,
+    tileBounds: { north: number; south: number; east: number; west: number },
+    gridSize?: number
+): Promise<LeafletTileData> {
+    return new Promise((resolve, reject) => {
+        const workerCreationStart = performance.now();
+        console.log('🔧 [LEAFLET-OM] Création worker pour tuile flèches - Début:', workerCreationStart);
+
+        const worker = new TileWorker();
+        const key = `leaflet_arrows_${coords.z}_${coords.x}_${coords.y}`;
+
+        const workerMessage = {
+            type: 'GT',
+            mode: 'arrows',
+            x: coords.x,
+            y: coords.y,
+            z: coords.z,
+            key: key,
+            data: cachedWindUV ? { u: cachedWindUV.u, v: cachedWindUV.v } : null,
+            domain: JSON.parse(JSON.stringify(domain)),
+            variable: JSON.parse(JSON.stringify({ value: 'wind_10m', label: 'Average Wind 10m' } as Variable)),
+            ranges: ranges ? JSON.parse(JSON.stringify(ranges)) : null,
+            dark: dark,
+            mapBounds: mapBounds ? [...mapBounds] : [],
+            outputFormat: 'leaflet',
+            tileBounds: tileBounds,
+            gridSize: gridSize
+        } as unknown as {
+            type: string;
+            mode: string;
+            x: number; y: number; z: number;
+            key: string;
+            data: { u: TypedArray; v: TypedArray } | null;
+            domain: Domain;
+            variable: Variable;
+            ranges: Range[] | null;
+            dark: boolean;
+            mapBounds: number[];
+            outputFormat: string;
+            tileBounds: { north: number; south: number; east: number; west: number };
+            gridSize?: number;
+        };
+
+        // Timeout
+        const workerTimeout = setTimeout(() => {
+            console.warn('⏰ [LEAFLET-OM] TIMEOUT worker flèches après 10s');
+            worker.terminate();
+            reject(new Error('Worker timeout (arrows) after 10 seconds'));
+        }, 10000);
+
+        worker.onmessage = (message) => {
+            clearTimeout(workerTimeout);
+            if (message.data.type === 'RT' && message.data.key === key) {
+                const tileData: LeafletTileData = {
+                    rgba: message.data.rgba,
+                    width: TILE_SIZE,
+                    height: TILE_SIZE,
+                    coords: coords
+                };
+                worker.terminate();
+                resolve(tileData);
+            }
+        };
+
+        worker.onerror = (error) => {
+            clearTimeout(workerTimeout);
+            worker.terminate();
+            reject(error);
+        };
+
+        try {
+            worker.postMessage(workerMessage);
+        } catch (error) {
+            clearTimeout(workerTimeout);
+            worker.terminate();
+            reject(error);
+        }
+    });
 }
 
 /**

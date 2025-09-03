@@ -111,7 +111,7 @@ const getIndexAndFractions = (
 ) => {
 	let indexObject: IndexAndFractions;
 	if (domain.grid.projection && projectionGrid) {
-		indexObject = projectionGrid.findPointInterpolated(lat, lon, ranges);
+		indexObject = projectionGrid.findPointInterpolated(lat, lon);
 	} else {
 		indexObject = getIndexFromLatLong(lat, lon, domain, ranges);
 	}
@@ -127,6 +127,139 @@ const getIndexAndFractions = (
 
 self.onmessage = async (message) => {
 	if (message.data.type == 'GT') {
+		// Mode flèches (overlay): rendu transparent à partir de composantes U/V
+		if (message.data.mode === 'arrows') {
+			const workerProcessingStart = performance.now();
+			const key = message.data.key;
+			const x = message.data.x;
+			const y = message.data.y;
+			const z = message.data.z;
+			const ranges = message.data.ranges;
+			const outputFormat = message.data.outputFormat || 'maplibre';
+			const domain: Domain = message.data.domain;
+			const uValues = message.data.data?.u as Float32Array;
+			const vValues = message.data.data?.v as Float32Array;
+
+			const pixels = TILE_SIZE * TILE_SIZE;
+			const rgba = new Uint8ClampedArray(pixels * 4);
+
+			let projectionGrid = null;
+			if (domain.grid.projection) {
+				const projectionName = domain.grid.projection.name;
+				const projection = new DynamicProjection(
+					projectionName,
+					domain.grid.projection
+				) as Projection;
+				projectionGrid = new ProjectionGrid(projection, domain.grid);
+			}
+
+			const samples = (() => {
+				const gridSize = message.data.gridSize;
+				if (typeof gridSize === 'number' && gridSize > 0) return gridSize;
+				if (z <= 4) return 8;
+				if (z <= 7) return 12;
+				if (z <= 10) return 16;
+				return 20;
+			})();
+
+			const step = TILE_SIZE / samples;
+			const ctxWidth = TILE_SIZE;
+			const ctxHeight = TILE_SIZE;
+
+			const drawLine = (x0: number, y0: number, x1: number, y1: number) => {
+				const dx = Math.abs(Math.round(x1) - Math.round(x0));
+				const dy = Math.abs(Math.round(y1) - Math.round(y0));
+				const sx = Math.round(x0) < Math.round(x1) ? 1 : -1;
+				const sy = Math.round(y0) < Math.round(y1) ? 1 : -1;
+				let err = dx - dy;
+				let xCur = Math.round(x0);
+				let yCur = Math.round(y0);
+				const xEnd = Math.round(x1);
+				const yEnd = Math.round(y1);
+				while (true) {
+					if (xCur >= 0 && xCur < ctxWidth && yCur >= 0 && yCur < ctxHeight) {
+						const ind = (yCur * ctxWidth + xCur) * 4;
+						rgba[ind] = 0;
+						rgba[ind + 1] = 0;
+						rgba[ind + 2] = 0;
+						rgba[ind + 3] = 200; // alpha
+					}
+					if (xCur === xEnd && yCur === yEnd) break;
+					const e2 = 2 * err;
+					if (e2 > -dy) { err -= dy; xCur += sx; }
+					if (e2 < dx) { err += dx; yCur += sy; }
+				}
+			};
+
+			const drawArrowAt = (cx: number, cy: number, angle: number, length: number) => {
+				const x2 = cx + Math.cos(angle) * length;
+				const y2 = cy + Math.sin(angle) * length;
+				const head = Math.max(3, Math.floor(length * 0.25));
+				const leftAngle = angle + Math.PI * 0.75;
+				const rightAngle = angle - Math.PI * 0.75;
+				const xl = x2 + Math.cos(leftAngle) * head;
+				const yl = y2 + Math.sin(leftAngle) * head;
+				const xr = x2 + Math.cos(rightAngle) * head;
+				const yr = y2 + Math.sin(rightAngle) * head;
+				drawLine(cx, cy, x2, y2);
+				drawLine(x2, y2, xl, yl);
+				drawLine(x2, y2, xr, yr);
+			};
+
+			for (let i = 0; i < samples; i++) {
+				for (let j = 0; j < samples; j++) {
+					const px = j * step + step / 2;
+					const py = i * step + step / 2;
+
+					const lat = tile2lat(y + py / TILE_SIZE, z);
+					const lon = tile2lon(x + px / TILE_SIZE, z);
+
+					const { index, xFraction, yFraction } = getIndexAndFractions(
+						lat,
+						lon,
+						domain,
+						projectionGrid,
+						ranges
+					);
+
+					if (!Number.isFinite(index)) continue;
+					const nx = ranges[1]['end'] - ranges[1]['start'];
+					const base = index as number;
+					const u =
+						Number(uValues[base]) * (1 - xFraction) * (1 - yFraction) +
+						Number(uValues[base + 1]) * xFraction * (1 - yFraction) +
+						Number(uValues[base + nx]) * (1 - xFraction) * yFraction +
+						Number(uValues[base + 1 + nx]) * xFraction * yFraction;
+					const v =
+						Number(vValues[base]) * (1 - xFraction) * (1 - yFraction) +
+						Number(vValues[base + 1]) * xFraction * (1 - yFraction) +
+						Number(vValues[base + nx]) * (1 - xFraction) * yFraction +
+						Number(vValues[base + 1 + nx]) * xFraction * yFraction;
+
+					if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+					const speed = Math.hypot(u, v);
+					if (!Number.isFinite(speed) || speed <= 0.25) continue;
+
+					// Angle carte (y vers le bas)
+					const angle = -Math.atan2(u, v);
+					const length = Math.min(18, Math.max(6, speed * 2.0));
+					drawArrowAt(px, py, angle, length);
+				}
+			}
+
+			const workerProcessingEnd = performance.now();
+			const totalProcessingTime = workerProcessingEnd - workerProcessingStart;
+
+			if (outputFormat === 'leaflet') {
+				postMessage({ type: 'RT', rgba, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: totalProcessingTime });
+			} else {
+				const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
+				postMessage({ type: 'RT', tile, key, processingTime: totalProcessingTime });
+			}
+
+			self.close();
+			return;
+		}
 		const workerProcessingStart = performance.now();
 		console.log('🔧 [WORKER] Message GT reçu - Début traitement:', {
 			key: message.data.key,
