@@ -37,6 +37,38 @@
 	let omFileLayer: any = null;
 	let windArrowsLayer: any = null;
 
+	// Réglages flèches (UI)
+	let showArrowsSettings = $state(false);
+	let arrowGridSize = $state<number | undefined>(undefined); // undefined => auto
+	let arrowLineWidth = $state(2);
+	let arrowHeadSize = $state(6);
+	let arrowOpacity = $state(0.85);
+	let arrowHalo = $state(true);
+	let arrowHaloWidth = $state(1.5);
+	let arrowUsePalette = $state(true);
+	let arrowFixedColor = $state('#000000');
+
+	const hexToRgb = (hex: string): [number, number, number] => {
+		const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+		return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
+	};
+
+	const getArrowStyle = () => ({
+		lineWidth: arrowLineWidth,
+		headSize: arrowHeadSize,
+		opacity: arrowOpacity,
+		useSpeedColor: arrowUsePalette,
+		color: hexToRgb(arrowFixedColor) as [number, number, number],
+		halo: arrowHalo,
+		haloWidth: arrowHaloWidth
+	});
+
+	const updateArrowsLayerOptions = async () => {
+		if (windArrowsLayer) {
+			windArrowsLayer.updateOptions({ gridSize: arrowGridSize, arrowStyle: getArrowStyle() });
+		}
+	};
+
 			const addOmFileLayer = async () => {
 		if (!map || !omUrl) return;
 
@@ -70,7 +102,10 @@
 				omUrl: omUrl,
 				domain: domain,
 				variable: variable,
-				opacity: 1
+				opacity: 1,
+				gridSize: arrowGridSize,
+				// @ts-ignore - options étendues
+				arrowStyle: getArrowStyle()
 			});
 			windArrowsLayer.addTo(map);
 			console.log('🧭 [PAGE] Couche flèches ajoutée');
@@ -511,14 +546,14 @@
 	<div class="map" id="map_container" bind:this={mapContainer}></div>
 
 	<!-- Debug info -->
-	<div class="absolute bottom-1 right-1 z-40 bg-black/70 text-white text-xs p-2 rounded">
+	<div class="absolute bottom-1 right-1 z-[100005] bg-black/70 text-white text-xs p-2 rounded">
 		TimeSelector: {showTimeSelector ? 'VISIBLE' : 'CACHÉ'}
 	</div>
 
 			<!-- Panneau supprimé - informations intégrées dans le time slider -->
 
 	<!-- Échelle de couleur -->
-	<div class="absolute bottom-1 left-1 max-h-[300px] z-40">
+	<div class="absolute bottom-1 left-1 max-h-[300px] z-[100005] pointer-events-none">
 		<Scale {showScale} {variable} />
 	</div>
 </div>
@@ -561,6 +596,55 @@
 				}
 			}}
 		/>
+	</div>
+
+	<!-- Réglages flèches -->
+	<div class="bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-gray-200" style="z-index: 100003; min-width: 260px;">
+		<div class="flex items-center justify-between mb-2">
+			<div class="font-semibold">Flèches</div>
+			<label class="text-sm flex items-center gap-2">
+				<input type="checkbox" bind:checked={showArrowsSettings} />
+				<span>Afficher réglages</span>
+			</label>
+		</div>
+		{#if showArrowsSettings}
+			<div class="space-y-2 text-sm">
+				<div class="flex items-center justify-between gap-2">
+					<label>Densité</label>
+					<input type="range" min="6" max="20" step="1" bind:value={arrowGridSize} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Épaisseur</label>
+					<input type="range" min="1" max="4" step="0.5" bind:value={arrowLineWidth} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Tête</label>
+					<input type="range" min="3" max="12" step="1" bind:value={arrowHeadSize} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Opacité</label>
+					<input type="range" min="0.4" max="1" step="0.05" bind:value={arrowOpacity} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Halo</label>
+					<input type="checkbox" bind:checked={arrowHalo} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Largeur halo</label>
+					<input type="range" min="0" max="3" step="0.5" bind:value={arrowHaloWidth} on:change={updateArrowsLayerOptions} />
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<label>Palette vitesse</label>
+					<input type="checkbox" bind:checked={arrowUsePalette} on:change={updateArrowsLayerOptions} />
+				</div>
+				{#if !arrowUsePalette}
+					<div class="flex items-center justify-between gap-2">
+						<label>Couleur</label>
+						<input type="color" bind:value={arrowFixedColor} on:change={updateArrowsLayerOptions} />
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 </div>
 <!-- Time Slider Simple -->

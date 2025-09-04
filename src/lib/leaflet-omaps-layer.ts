@@ -309,7 +309,7 @@ export async function createWindArrowsLayerWithWorker(options: OMapsLayerOptions
         return canvas;
       }
 
-      getTileForLeafletArrows(coords, this.options.omUrl, this.options.gridSize)
+      getTileForLeafletArrows(coords, this.options.omUrl, this.options.gridSize, (this.options as any).arrowStyle)
         .then((tileData) => {
           const arrowsCanvas = rgbaToCanvas(tileData);
           const ctx = canvas.getContext('2d');

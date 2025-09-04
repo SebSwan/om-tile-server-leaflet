@@ -128,3 +128,13 @@ export interface Range {
 	start: number;
 	end: number;
 }
+
+export interface WindArrowStyle {
+	lineWidth: number;
+	headSize: number;
+	opacity: number; // 0..1
+	useSpeedColor: boolean;
+	color?: [number, number, number];
+	halo: boolean;
+	haloWidth: number;
+}

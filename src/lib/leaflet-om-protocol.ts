@@ -20,6 +20,7 @@ import { OMapsFileReader } from '../omaps-reader';
 import TileWorker from '../worker?worker';
 
 import type { TileIndex, Domain, Variable, Range } from '$lib/types';
+type WindArrowStyle = import('$lib/types').WindArrowStyle;
 
 // 🔧 Configuration globale pour Leaflet
 let dark = false;
@@ -189,7 +190,8 @@ export async function getTileForLeaflet(
 export async function getTileForLeafletArrows(
     coords: TileIndex,
     omUrl: string,
-    gridSize?: number
+    gridSize?: number,
+    style?: WindArrowStyle
 ): Promise<LeafletTileData> {
     const totalTileStart = performance.now();
     console.log('🎯 [LEAFLET-OM] getTileForLeafletArrows() appelée:', {
@@ -226,7 +228,7 @@ export async function getTileForLeafletArrows(
     // Générer via worker
     await acquireArrowsSlot();
     try {
-        const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize);
+        const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize, style);
         return tileResult;
     } finally {
         releaseArrowsSlot();
@@ -526,7 +528,8 @@ async function generateTileWithWorker(
 async function generateArrowsTileWithWorker(
     coords: TileIndex,
     tileBounds: { north: number; south: number; east: number; west: number },
-    gridSize?: number
+    gridSize?: number,
+    style?: WindArrowStyle
 ): Promise<LeafletTileData> {
     return new Promise((resolve, reject) => {
         const workerCreationStart = performance.now();
@@ -550,7 +553,8 @@ async function generateArrowsTileWithWorker(
             mapBounds: mapBounds ? [...mapBounds] : [],
             outputFormat: 'leaflet',
             tileBounds: tileBounds,
-            gridSize: gridSize
+            gridSize: gridSize,
+            arrowStyle: style
         } as unknown as {
             type: string;
             mode: string;
@@ -565,6 +569,7 @@ async function generateArrowsTileWithWorker(
             outputFormat: string;
             tileBounds: { north: number; south: number; east: number; west: number };
             gridSize?: number;
+            arrowStyle?: WindArrowStyle;
         };
 
         // Timeout

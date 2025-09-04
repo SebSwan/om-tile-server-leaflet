@@ -111,7 +111,17 @@ const getIndexAndFractions = (
 ) => {
 	let indexObject: IndexAndFractions;
 	if (domain.grid.projection && projectionGrid) {
-		indexObject = projectionGrid.findPointInterpolated(lat, lon);
+		// Utiliser la projection et tenir compte des ranges partiels
+		const [xRaw, yRaw] = projectionGrid.findPointInterpolated2D(lat, lon);
+		const nxr = ranges[1]['end'] - ranges[1]['start'];
+		const nyr = ranges[0]['end'] - ranges[0]['start'];
+		// Top-left cellule pour interpolation bilinéaire, bornée dans [0..n-2]
+		const xFloor = Math.max(0, Math.min(Math.floor(xRaw), Math.max(0, nxr - 2)));
+		const yFloor = Math.max(0, Math.min(Math.floor(yRaw), Math.max(0, nyr - 2)));
+		const xFraction = Math.min(1, Math.max(0, xRaw - xFloor));
+		const yFraction = Math.min(1, Math.max(0, yRaw - yFloor));
+		const index = yFloor * nxr + xFloor;
+		return { index, xFraction, yFraction };
 	} else {
 		indexObject = getIndexFromLatLong(lat, lon, domain, ranges);
 	}
@@ -140,17 +150,8 @@ self.onmessage = async (message) => {
 			const uValues = message.data.data?.u as Float32Array;
 			const vValues = message.data.data?.v as Float32Array;
 
-			// Canvas hors-écran pour un rendu anti-crénelé des flèches
-			const offscreen = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
-			const ctx = offscreen.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
-			if (!ctx) {
-				// Fallback en cas d'absence de contexte (rare)
-				const pixels = TILE_SIZE * TILE_SIZE;
-				const rgba = new Uint8ClampedArray(pixels * 4);
-				postMessage({ type: 'RT', rgba, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: 0 });
-				self.close();
-				return;
-			}
+			const pixels = TILE_SIZE * TILE_SIZE;
+			let rgba: Uint8ClampedArray = new Uint8ClampedArray(pixels * 4);
 
 			let projectionGrid = null;
 			if (domain.grid.projection) {
@@ -172,8 +173,8 @@ self.onmessage = async (message) => {
 			})();
 
 			const step = TILE_SIZE / samples;
-			// const ctxWidth = TILE_SIZE;
-			// const ctxHeight = TILE_SIZE;
+			const ctxWidth = TILE_SIZE;
+			const ctxHeight = TILE_SIZE;
 
 			// Alignement global (monde) et marge de débord
 			const worldX0 = x * TILE_SIZE;
@@ -182,44 +183,61 @@ self.onmessage = async (message) => {
 			const phaseY = ((step / 2 - (worldY0 % step)) + step) % step;
 			const margin = Math.min(12, Math.max(6, Math.floor(step * 0.5)));
 
-			// Style B: configuration de rendu
-			ctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
-			ctx.lineCap = 'round';
-			ctx.lineJoin = 'round';
-			ctx.miterLimit = 2;
-			ctx.shadowColor = 'rgba(255,255,255,0.6)';
-			ctx.shadowBlur = 0.8;
-			ctx.shadowOffsetX = 0;
-			ctx.shadowOffsetY = 0;
+			const drawLine = (x0: number, y0: number, x1: number, y1: number) => {
+				const dx = Math.abs(Math.round(x1) - Math.round(x0));
+				const dy = Math.abs(Math.round(y1) - Math.round(y0));
+				const sx = Math.round(x0) < Math.round(x1) ? 1 : -1;
+				const sy = Math.round(y0) < Math.round(y1) ? 1 : -1;
+				let err = dx - dy;
+				let xCur = Math.round(x0);
+				let yCur = Math.round(y0);
+				const xEnd = Math.round(x1);
+				const yEnd = Math.round(y1);
+				while (true) {
+					if (xCur >= 0 && xCur < ctxWidth && yCur >= 0 && yCur < ctxHeight) {
+						const ind = (yCur * ctxWidth + xCur) * 4;
+						rgba[ind] = 0;
+						rgba[ind + 1] = 0;
+						rgba[ind + 2] = 0;
+						rgba[ind + 3] = 200; // alpha
+					}
+					if (xCur === xEnd && yCur === yEnd) break;
+					const e2 = 2 * err;
+					if (e2 > -dy) { err -= dy; xCur += sx; }
+					if (e2 < dx) { err += dx; yCur += sy; }
+				}
+			};
 
-			const drawArrowAt = (cx: number, cy: number, angle: number, length: number, speed: number) => {
+			const drawArrowAtRaster = (cx: number, cy: number, angle: number, length: number) => {
 				const x2 = cx + Math.cos(angle) * length;
 				const y2 = cy + Math.sin(angle) * length;
-				const head = Math.max(3, Math.floor(length * 0.35));
-				// Épaisseur modulée par densité et vitesse
-				const baseWidth = Math.max(1.2, Math.min(2.0, step * 0.10));
-				ctx.lineWidth = Math.min(3.0, baseWidth + Math.min(1.0, speed * 0.06));
-				ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-				ctx.fillStyle = 'rgba(0,0,0,0.85)';
-
-				ctx.beginPath();
-				ctx.moveTo(cx, cy);
-				ctx.lineTo(x2, y2);
-				ctx.stroke();
-
-				const leftAngle = angle + Math.PI * 0.82;
-				const rightAngle = angle - Math.PI * 0.82;
+				const head = Math.max(3, Math.floor(length * 0.25));
+				const leftAngle = angle + Math.PI * 0.75;
+				const rightAngle = angle - Math.PI * 0.75;
 				const xl = x2 + Math.cos(leftAngle) * head;
 				const yl = y2 + Math.sin(leftAngle) * head;
 				const xr = x2 + Math.cos(rightAngle) * head;
 				const yr = y2 + Math.sin(rightAngle) * head;
-				ctx.beginPath();
-				ctx.moveTo(x2, y2);
-				ctx.lineTo(xl, yl);
-				ctx.lineTo(xr, yr);
-				ctx.closePath();
-				ctx.fill();
+				drawLine(cx, cy, x2, y2);
+				drawLine(x2, y2, xl, yl);
+				drawLine(x2, y2, xr, yr);
 			};
+
+			// OffscreenCanvas pour un rendu qualitatif
+			const useOffscreen = typeof OffscreenCanvas !== 'undefined';
+			let ctx2d: OffscreenCanvasRenderingContext2D | null = null;
+			if (useOffscreen) {
+				const off = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
+				ctx2d = off.getContext('2d');
+				if (ctx2d) {
+					ctx2d.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+					ctx2d.lineCap = 'round';
+				}
+			}
+
+			// Style des flèches
+			const style = message.data.arrowStyle || { lineWidth: 2, headSize: 6, opacity: 0.85, useSpeedColor: true, color: [0,0,0], halo: true, haloWidth: 1.5 };
+			const windScale = getColorScale({ value: 'wind_10m', label: 'Average Wind 10m' } as unknown as { value: string; label: string });
 
 			// Boucles alignées et débordantes (clip implicite par canvas)
 			for (let py = -margin + phaseY; py < TILE_SIZE + margin; py += step) {
@@ -257,18 +275,61 @@ self.onmessage = async (message) => {
 					// Angle carte (y vers le bas)
 					const angle = -Math.atan2(u, v);
 					const length = Math.min(18, Math.max(6, speed * 2.0));
-					drawArrowAt(px, py, angle, length, speed);
+					const rgb = style.useSpeedColor ? (getColor(windScale, speed) as [number,number,number]) : (style.color as [number,number,number]);
+					// alpha calculé mais non utilisé directement en mode Offscreen
+					if (ctx2d) {
+						// Halo
+						if (style.halo) {
+							ctx2d.strokeStyle = `rgba(255,255,255,0.9)`;
+							ctx2d.lineWidth = style.lineWidth + style.haloWidth * 2;
+							ctx2d.beginPath();
+							ctx2d.moveTo(px, py);
+							ctx2d.lineTo(px + Math.cos(angle) * length, py + Math.sin(angle) * length);
+							ctx2d.stroke();
+						}
+						// Fût
+						ctx2d.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${style.opacity})`;
+						ctx2d.lineWidth = style.lineWidth;
+						ctx2d.beginPath();
+						ctx2d.moveTo(px, py);
+						const x2 = px + Math.cos(angle) * length;
+						const y2 = py + Math.sin(angle) * length;
+						ctx2d.lineTo(x2, y2);
+						ctx2d.stroke();
+						// Tête
+						const head = Math.max(3, style.headSize);
+						const leftAngle = angle + Math.PI * 0.75;
+						const rightAngle = angle - Math.PI * 0.75;
+						const xl = x2 + Math.cos(leftAngle) * head;
+						const yl = y2 + Math.sin(leftAngle) * head;
+						const xr = x2 + Math.cos(rightAngle) * head;
+						const yr = y2 + Math.sin(rightAngle) * head;
+						ctx2d.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${style.opacity})`;
+						ctx2d.beginPath();
+						ctx2d.moveTo(x2, y2);
+						ctx2d.lineTo(xl, yl);
+						ctx2d.lineTo(xr, yr);
+						ctx2d.closePath();
+						ctx2d.fill();
+					} else {
+						// Fallback raster si OffscreenCanvas indisponible
+						drawArrowAtRaster(px, py, angle, length);
+					}
 				}
+			}
+
+			if (ctx2d) {
+				const img = ctx2d.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+				rgba = img.data;
 			}
 
 			const workerProcessingEnd = performance.now();
 			const totalProcessingTime = workerProcessingEnd - workerProcessingStart;
 
-			const imageData = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
 			if (outputFormat === 'leaflet') {
-				postMessage({ type: 'RT', rgba: imageData.data, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: totalProcessingTime });
+				postMessage({ type: 'RT', rgba, width: TILE_SIZE, height: TILE_SIZE, key, processingTime: totalProcessingTime });
 			} else {
-				const tile = await createImageBitmap(imageData);
+				const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
 				postMessage({ type: 'RT', tile, key, processingTime: totalProcessingTime });
 			}
 
