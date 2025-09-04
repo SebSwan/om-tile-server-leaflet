@@ -178,7 +178,7 @@ async function readRawVariable(initKey: string, variableName: string): Promise<F
   return p;
 }
 
-async function ensureVariableData(fullUrl: string): Promise<{ ctx: InitContext; varObj: Variable; values: Float32Array }> {
+async function ensureVariableData(fullUrl: string): Promise<{ ctx: InitContext; varObj: Variable; values: Float32Array; u?: Float32Array; v?: Float32Array }> {
   const { initKey, variableValue } = buildKeys(fullUrl);
   const ctx = await ensureInit(fullUrl);
 
@@ -198,11 +198,11 @@ async function ensureVariableData(fullUrl: string): Promise<{ ctx: InitContext; 
       const windKey = `${initKey}::wind_10m`;
       if (dataCacheByKey.has(windKey)) {
         const values = dataCacheByKey.get(windKey)!;
-        return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values };
+        return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values, u, v };
       }
       const intensity = computeWindIntensity(u, v);
       dataCacheByKey.set(windKey, intensity);
-      return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values: intensity };
+      return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values: intensity, u, v };
     } else {
       // u/v manquants: v contient le fallback
       return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values: v };
@@ -250,7 +250,7 @@ export async function getTileForLeaflet(
 
 	// 🔄 S'assurer que l'init est faite et obtenir la donnée variable
 	const dataLoadStart = performance.now();
-	const { ctx, varObj, values } = await ensureVariableData(omUrl);
+	const { ctx, varObj, values, u, v } = await ensureVariableData(omUrl);
 	const dataLoadTime = performance.now() - dataLoadStart;
 	console.log('✅ [LEAFLET-OM] Données prêtes:', {
 		variable: varObj.value,
@@ -269,7 +269,7 @@ export async function getTileForLeaflet(
 	});
 
 	// 🔧 Créer worker pour générer la tuile
-	const tileResult = await generateTileWithWorker(coords, tileBounds, ctx, varObj, values);
+	const tileResult = await generateTileWithWorker(coords, tileBounds, ctx, varObj, values, u, v);
 
 	const totalTileTime = performance.now() - totalTileStart;
 	console.log('🏁 [LEAFLET-OM] Tuile complète générée:', {
@@ -448,7 +448,9 @@ async function generateTileWithWorker(
 	tileBounds: { north: number; south: number; east: number; west: number },
 	ctx: InitContext,
 	varObj: Variable,
-	values: Float32Array
+	values: Float32Array,
+	u?: Float32Array,
+	v?: Float32Array
 ): Promise<LeafletTileData> {
 	return new Promise((resolve, reject) => {
 		const workerCreationStart = performance.now();
@@ -473,7 +475,19 @@ async function generateTileWithWorker(
 			dark: ctx.dark,
 			mapBounds: ctx.mapBounds ? [...ctx.mapBounds] : [],
 			outputFormat: 'leaflet', // 🆕 Nouveau flag pour le format Leaflet
-			tileBounds: tileBounds   // 🆕 Bounds géographiques de la tuile
+			tileBounds: tileBounds,  // 🆕 Bounds géographiques de la tuile
+			wind: u && v ? { u, v } : undefined,
+			arrowOptions: {
+				stepPx: 16,
+				minZoom: 4,
+				minSpeed: 2,
+				scale: 0.6,
+				alphaMin: 0.4,
+				alphaMax: 0.9,
+				lineWidth: 1.2,
+				colorDark: [255, 255, 255],
+				colorLight: [0, 0, 0]
+			}
 		};
 
 		console.log('📤 [LEAFLET-OM] Envoi message au worker:', {
@@ -602,7 +616,6 @@ export function rgbaToCanvas(tileData: LeafletTileData): HTMLCanvasElement {
 export function clearOMCache(): void {
 	console.log('🧹 [LEAFLET-OM] Nettoyage cache');
 	cachedData = null;
-	cachedOmUrl = '';
 	if (omapsFileReader) {
 		omapsFileReader.dispose();
 	}

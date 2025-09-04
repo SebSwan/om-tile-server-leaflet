@@ -5,6 +5,7 @@ import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/p
 import { tile2lat, tile2lon, getIndexFromLatLong } from '$lib/utils/math';
 
 import { getColorScale, getInterpolator } from '$lib/utils/color-scales';
+import { interpolateLinear } from '$lib/utils/interpolations';
 
 import type { ColorScale, Domain, IndexAndFractions } from '$lib/types';
 
@@ -111,7 +112,7 @@ const getIndexAndFractions = (
 ) => {
 	let indexObject: IndexAndFractions;
 	if (domain.grid.projection && projectionGrid) {
-		indexObject = projectionGrid.findPointInterpolated(lat, lon, ranges);
+		indexObject = projectionGrid.findPointInterpolated(lat, lon);
 	} else {
 		indexObject = getIndexFromLatLong(lat, lon, domain, ranges);
 	}
@@ -151,7 +152,7 @@ self.onmessage = async (message) => {
 		const colorScale = getColorScale(message.data.variable);
 
 		const pixels = TILE_SIZE * TILE_SIZE;
-		const rgba = new Uint8ClampedArray(pixels * 4);
+		let rgba = new Uint8ClampedArray(pixels * 4);
 		const dark = message.data.dark;
 
 		console.log('🎨 [WORKER] Configuration traitement:', {
@@ -234,6 +235,100 @@ self.onmessage = async (message) => {
 			validPixels: validPixels,
 			percentValid: ((validPixels / pixelsProcessed) * 100).toFixed(1) + '%'
 		});
+
+		// 🏹 Dessin des flèches de vent via OffscreenCanvas (si U/V fournis)
+		try {
+			const wind = message.data.wind;
+			const arrowOptions = message.data.arrowOptions || {};
+			const hasWind = wind && wind.u && wind.v && Array.isArray(wind.u) === false && Array.isArray(wind.v) === false;
+			const isWindVar = typeof variable?.value === 'string' && variable.value.startsWith('wind');
+			if (hasWind && isWindVar) {
+				const stepPx: number = arrowOptions.stepPx ?? 16;
+				const minZoom: number = arrowOptions.minZoom ?? 4;
+				const minSpeed: number = arrowOptions.minSpeed ?? 2;
+				const scale: number = arrowOptions.scale ?? 0.6;
+				const alphaMin: number = arrowOptions.alphaMin ?? 0.4;
+				const alphaMax: number = arrowOptions.alphaMax ?? 0.9;
+				const lineWidth: number = arrowOptions.lineWidth ?? 1.2;
+				const colorDark: [number, number, number] = arrowOptions.colorDark ?? [255, 255, 255];
+				const colorLight: [number, number, number] = arrowOptions.colorLight ?? [0, 0, 0];
+
+				if (z >= minZoom) {
+					const oc = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
+					const ctx2d = oc.getContext('2d');
+					if (ctx2d) {
+						// Peindre la tuile d'intensité existante
+						const baseImage = new ImageData(rgba, TILE_SIZE, TILE_SIZE);
+						ctx2d.putImageData(baseImage, 0, 0);
+
+						// Choix couleur selon thème
+						const [cr, cg, cb] = dark ? colorDark : colorLight;
+						ctx2d.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, 1)`;
+						ctx2d.lineWidth = lineWidth;
+						ctx2d.lineCap = 'round';
+
+						const uArr: Float32Array = wind.u as Float32Array;
+						const vArr: Float32Array = wind.v as Float32Array;
+						const nx = ranges[1]['end'] - ranges[1]['start'];
+
+						// Parcours grille clairsemée
+						for (let py = Math.floor(stepPx / 2); py < TILE_SIZE; py += stepPx) {
+							const lat = tile2lat(y + py / TILE_SIZE, z);
+							for (let pxp = Math.floor(stepPx / 2); pxp < TILE_SIZE; pxp += stepPx) {
+								const lon = tile2lon(x + pxp / TILE_SIZE, z);
+								const { index, xFraction, yFraction } = getIndexAndFractions(
+									lat,
+									lon,
+									domain,
+									projectionGrid,
+									ranges
+								);
+
+								if (!Number.isFinite(index)) continue;
+
+								const uVal = interpolateLinear(uArr as unknown as any, nx, index, xFraction, yFraction);
+								const vVal = interpolateLinear(vArr as unknown as any, nx, index, xFraction, yFraction);
+								if (!Number.isFinite(uVal) || !Number.isFinite(vVal)) continue;
+
+								const speed = Math.hypot(uVal, vVal);
+								if (speed < minSpeed) continue;
+
+								const t = Math.max(0, Math.min(1, (speed - minSpeed) / (20 - minSpeed)));
+								const alpha = alphaMin + (alphaMax - alphaMin) * t;
+								ctx2d.globalAlpha = alpha;
+
+								// Direction écran: y vers le bas → inverser v
+								const angle = Math.atan2(-vVal, uVal);
+								const len = scale * stepPx * (0.6 + 0.4 * Math.min(1, speed / 10));
+
+								ctx2d.save();
+								ctx2d.translate(pxp + 0.5, py + 0.5);
+								ctx2d.rotate(angle);
+								// Tige
+								ctx2d.beginPath();
+								ctx2d.moveTo(-len * 0.3, 0);
+								ctx2d.lineTo(len * 0.7, 0);
+								ctx2d.stroke();
+								// Pointe
+								ctx2d.beginPath();
+								ctx2d.moveTo(len * 0.7, 0);
+								ctx2d.lineTo(len * 0.5, -len * 0.18);
+								ctx2d.moveTo(len * 0.7, 0);
+								ctx2d.lineTo(len * 0.5, len * 0.18);
+								ctx2d.stroke();
+								ctx2d.restore();
+							}
+						}
+
+						// Récupérer RGBA avec flèches
+						const composed = ctx2d.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+						rgba = new Uint8ClampedArray(composed.data);
+					}
+				}
+			}
+		} catch (err) {
+			console.warn('⚠️ [WORKER] Dessin flèches ignoré:', err);
+		}
 
 		if (drawOnTiles.includes(variable.value)) {
 			console.log('🎯 [WORKER] Application des icônes sur tuile...');
