@@ -57,6 +57,33 @@ const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 
 console.log('🚀 [LEAFLET-OM] Protocole OM Leaflet initialisé, TILE_SIZE:', TILE_SIZE);
 
+// 👷 Limiteur de concurrence simple pour les workers (max 4)
+let ACTIVE_WORKERS = 0;
+const MAX_WORKERS = 4;
+const workerQueue: Array<() => void> = [];
+
+function runOrQueue<T>(task: () => Promise<T>): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const startTask = () => {
+			ACTIVE_WORKERS++;
+			task()
+				.then(resolve)
+				.catch(reject)
+				.finally(() => {
+					ACTIVE_WORKERS--;
+					const next = workerQueue.shift();
+					if (next) next();
+				});
+		};
+
+		if (ACTIVE_WORKERS < MAX_WORKERS) {
+			startTask();
+		} else {
+			workerQueue.push(startTask);
+		}
+	});
+}
+
 /**
  * 🧮 Calcul intensité du vent à partir des composantes U/V
  */
@@ -286,6 +313,7 @@ export async function getTileForLeaflet(
  * 🗂️ INITIALISATION DONNÉES OM POUR LEAFLET
  * Adaptation de initOMFile() original
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		console.log('🔄 [LEAFLET-OM] Initialisation fichier OM:', fullUrl);
@@ -452,7 +480,7 @@ async function generateTileWithWorker(
 	u?: Float32Array,
 	v?: Float32Array
 ): Promise<LeafletTileData> {
-	return new Promise((resolve, reject) => {
+	return runOrQueue<LeafletTileData>(() => new Promise((resolve, reject) => {
 		const workerCreationStart = performance.now();
 		console.log('🔧 [LEAFLET-OM] Création worker pour tuile - Début:', workerCreationStart);
 
@@ -579,7 +607,7 @@ async function generateTileWithWorker(
 			worker.terminate();
 			reject(error);
 		}
-	});
+	}));
 }
 
 /**
