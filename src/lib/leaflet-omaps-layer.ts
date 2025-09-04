@@ -11,7 +11,6 @@ export interface OMapsLayerOptions {
   domain: any;
   variable: any;
   ranges?: any;
-  dark?: boolean;
   opacity?: number;
 }
 

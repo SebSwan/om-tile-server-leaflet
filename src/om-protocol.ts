@@ -23,7 +23,6 @@ import TileWorker from './worker?worker';
 
 import type { TileJSON, TileIndex, Domain, Variable, Bounds, Range, ColorScale } from '$lib/types';
 
-let dark = false;
 let partial = false;
 let domain: Domain;
 let variable: Variable;
@@ -95,7 +94,6 @@ const getTile = async ({ z, x, y }: TileIndex, omUrl: string): Promise<ImageBitm
 		domain,
 		variable,
 		ranges,
-		dark: dark,
 		mapBounds: mapBounds
 	});
 	const tilePromise = new Promise<ImageBitmap>((resolve) => {
@@ -164,7 +162,6 @@ const initOMFile = (url: string): Promise<void> => {
 		const [omUrl, omParams] = url.replace('om://', '').split('?');
 
 		const urlParams = new URLSearchParams(omParams);
-		dark = urlParams.get('dark') === 'true';
 		partial = urlParams.get('partial') === 'true';
 		domain = domains.find((dm) => dm.value === omUrl.split('/')[4]) ?? domains[0];
 		variable = variables.find((v) => urlParams.get('variable') === v.value) ?? variables[0];

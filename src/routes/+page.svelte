@@ -413,7 +413,7 @@
 		}
 
 		// Construire l'URL finale avec les paramètres
-		const finalUrl = `${availableData.url}?dark=false&variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
+		const finalUrl = `${availableData.url}?variable=${variable.value}&bounds=${mapBounds.getSouth()},${mapBounds.getWest()},${mapBounds.getNorth()},${mapBounds.getEast()}&partial=${partial}`;
 
 		console.log('✅ [OM-URL] URL finale construite:', finalUrl.substring(0, 100) + '...');
 		return finalUrl;

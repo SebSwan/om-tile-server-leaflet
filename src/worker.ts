@@ -85,7 +85,7 @@ const getColor = (colorScale: ColorScale, px: number): number[] => {
 	];
 };
 
-const getOpacity = (v: string, px: number, dark: boolean): number => {
+const getOpacity = (v: string, px: number): number => {
 	if (v == 'cloud_cover' || v == 'thunderstorm_probability') {
 		// scale opacity with percentage
 		return 255 * (px ** 1.5 / 1000) * (OPACITY / 100);
@@ -97,7 +97,7 @@ const getOpacity = (v: string, px: number, dark: boolean): number => {
 		return Math.min(px / 1.5, 1) * 255 * (OPACITY / 100);
 	} else {
 		// else set the opacity with env variable and deduct 20% for darkmode
-		return 255 * (dark ? OPACITY / 100 - 0.2 : OPACITY / 100);
+		return 255 * (OPACITY / 100);
 	}
 };
 
@@ -154,7 +154,6 @@ self.onmessage = async (message) => {
 
 		const pixels = TILE_SIZE * TILE_SIZE;
 		let rgba = new Uint8ClampedArray(pixels * 4);
-		const dark = message.data.dark;
 
 		console.log('🎨 [WORKER] Configuration traitement:', {
 			tileSize: TILE_SIZE,
@@ -223,7 +222,7 @@ self.onmessage = async (message) => {
 						rgba[4 * ind] = color[0];
 						rgba[4 * ind + 1] = color[1];
 						rgba[4 * ind + 2] = color[2];
-						rgba[4 * ind + 3] = getOpacity(variable.value, px, dark);
+						rgba[4 * ind + 3] = getOpacity(variable.value, px);
 						validPixels++;
 					}
 				}
@@ -251,7 +250,6 @@ self.onmessage = async (message) => {
 				const alphaMin: number = arrowOptions.alphaMin ?? 0.4;
 				const alphaMax: number = arrowOptions.alphaMax ?? 0.9;
 				const lineWidth: number = arrowOptions.lineWidth ?? 1.2;
-				const colorDark: [number, number, number] = arrowOptions.colorDark ?? [255, 255, 255];
 				const colorLight: [number, number, number] = arrowOptions.colorLight ?? [0, 0, 0];
 
 				if (z >= minZoom) {
@@ -263,7 +261,7 @@ self.onmessage = async (message) => {
 						ctx2d.putImageData(baseImage, 0, 0);
 
 						// Choix couleur selon thème
-						const [cr, cg, cb] = dark ? colorDark : colorLight;
+						const [cr, cg, cb] = colorLight;
 						ctx2d.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, 1)`;
 						ctx2d.lineWidth = lineWidth;
 						ctx2d.lineCap = 'round';

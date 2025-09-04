@@ -22,7 +22,6 @@ import TileWorker from '../worker?worker';
 import type { TileIndex, Domain, Variable, Range } from '$lib/types';
 
 // 🔧 Configuration globale pour Leaflet
-let dark = false;
 let partial = false;
 let domain: Domain;
 let variable: Variable;
@@ -41,7 +40,6 @@ interface InitContext {
   domain: Domain;
   ranges: Range[];
   partial: boolean;
-  dark: boolean;
   mapBounds: number[];
   reader: OMapsFileReader;
 }
@@ -128,7 +126,6 @@ async function ensureInit(fullUrl: string): Promise<InitContext> {
   const p = new Promise<InitContext>((resolve, reject) => {
     const [omUrl, omParams] = fullUrl.replace('om://', '').split('?');
     const urlParams = new URLSearchParams(omParams);
-    const localDark = urlParams.get('dark') === 'true';
     const localPartial = urlParams.get('partial') === 'true';
 
     const urlParts = omUrl.split('/');
@@ -166,7 +163,6 @@ async function ensureInit(fullUrl: string): Promise<InitContext> {
           domain: localDomain,
           ranges: localRanges,
           partial: localPartial,
-          dark: localDark,
           mapBounds: localMapBounds,
           reader
         };
@@ -327,7 +323,6 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 		});
 
 		const urlParams = new URLSearchParams(omParams);
-		dark = urlParams.get('dark') === 'true';
 		partial = urlParams.get('partial') === 'true';
 
 		// Extraction du domaine depuis l'URL (ex: dwd_icon_d2)
@@ -348,7 +343,6 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 		console.log('📋 [LEAFLET-OM] Configuration extraite:', {
 			domain: domain.value,
 			variable: variable.value,
-			dark: dark,
 			partial: partial,
 			mapBounds: mapBounds,
 			domainGrid: {
@@ -500,7 +494,6 @@ async function generateTileWithWorker(
 			domain: JSON.parse(JSON.stringify(ctx.domain)),
 			variable: JSON.parse(JSON.stringify(varObj)),
 			ranges: ctx.ranges ? JSON.parse(JSON.stringify(ctx.ranges)) : null,
-			dark: ctx.dark,
 			mapBounds: ctx.mapBounds ? [...ctx.mapBounds] : [],
 			outputFormat: 'leaflet', // 🆕 Nouveau flag pour le format Leaflet
 			tileBounds: tileBounds,  // 🆕 Bounds géographiques de la tuile
