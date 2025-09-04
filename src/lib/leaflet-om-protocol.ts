@@ -20,7 +20,6 @@ import { OMapsFileReader } from '../omaps-reader';
 import TileWorker from '../worker?worker';
 
 import type { TileIndex, Domain, Variable, Range } from '$lib/types';
-type WindArrowStyle = import('$lib/types').WindArrowStyle;
 
 // 🔧 Configuration globale pour Leaflet
 let dark = false;
@@ -36,33 +35,21 @@ let ranges: Range[];
 
 // Cache des données pour éviter les rechargements
 let cachedData: { values: TypedArray | undefined } | null = null;
-let cachedOmUrl = '';
-let cachedWindUV: { u: TypedArray; v: TypedArray } | null = null;
 
-// Déduplication des initialisations par URL
-const initPromisesByUrl: Map<string, Promise<void>> = new Map();
-
-// Limitation de concurrence pour les tuiles flèches (éviter surcharge mémoire/CPU)
-let arrowsActive = 0;
-const ARROWS_MAX_CONCURRENCY = 3;
-const arrowsQueue: Array<() => void> = [];
-
-function acquireArrowsSlot(): Promise<void> {
-  if (arrowsActive < ARROWS_MAX_CONCURRENCY) {
-    arrowsActive++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => arrowsQueue.push(() => {
-    arrowsActive++;
-    resolve();
-  }));
+// Single-flight et caches par (URL, variable)
+interface InitContext {
+  domain: Domain;
+  ranges: Range[];
+  partial: boolean;
+  dark: boolean;
+  mapBounds: number[];
+  reader: OMapsFileReader;
 }
 
-function releaseArrowsSlot(): void {
-  arrowsActive = Math.max(0, arrowsActive - 1);
-  const next = arrowsQueue.shift();
-  if (next) next();
-}
+const initPromisesByKey: Map<string, Promise<InitContext>> = new Map();
+const initContextsByKey: Map<string, InitContext> = new Map();
+const variablePromisesByKey: Map<string, Promise<Float32Array>> = new Map();
+const dataCacheByKey: Map<string, Float32Array> = new Map();
 
 setupGlobalCache();
 
@@ -85,6 +72,149 @@ function computeWindIntensity(u: Float32Array, v: Float32Array): Float32Array {
 }
 
 /**
+ * 🔑 Construit des clés stables pour init (sans variable) et pour variable
+ */
+function buildKeys(fullUrl: string): { baseUrl: string; initKey: string; variableValue: string } {
+  const [baseUrl, paramStr = ''] = fullUrl.split('?');
+  const params = new URLSearchParams(paramStr);
+  const variableValue = params.get('variable') || '';
+  params.delete('variable');
+  // Normaliser l'ordre des paramètres
+  const sorted = new URLSearchParams();
+  Array.from(params.keys()).sort().forEach((k) => {
+    const v = params.getAll(k);
+    v.forEach((val) => sorted.append(k, val as string));
+  });
+  const initKey = sorted.toString() ? `${baseUrl}?${sorted.toString()}` : baseUrl;
+  return { baseUrl, initKey, variableValue };
+}
+
+async function ensureInit(fullUrl: string): Promise<InitContext> {
+  const { baseUrl, initKey } = buildKeys(fullUrl);
+  if (initContextsByKey.has(initKey)) {
+    return initContextsByKey.get(initKey)!;
+  }
+  if (initPromisesByKey.has(initKey)) {
+    return initPromisesByKey.get(initKey)!;
+  }
+
+  const p = new Promise<InitContext>((resolve, reject) => {
+    const [omUrl, omParams] = fullUrl.replace('om://', '').split('?');
+    const urlParams = new URLSearchParams(omParams);
+    const localDark = urlParams.get('dark') === 'true';
+    const localPartial = urlParams.get('partial') === 'true';
+
+    const urlParts = omUrl.split('/');
+    const domainValue = urlParts[4];
+    const localDomain = domains.find((dm) => dm.value === domainValue) ?? domains[0];
+
+    const localMapBounds = urlParams
+      .get('bounds')
+      ?.split(',')
+      .map((b: string): number => Number(b)) as number[];
+
+    const localMapBoundsIndexes = getIndicesFromBounds(
+      localMapBounds[0],
+      localMapBounds[1],
+      localMapBounds[2],
+      localMapBounds[3],
+      localDomain
+    );
+
+    const localRanges: Range[] = localPartial
+      ? [
+          { start: localMapBoundsIndexes[1], end: localMapBoundsIndexes[3] },
+          { start: localMapBoundsIndexes[0], end: localMapBoundsIndexes[2] }
+        ]
+      : [
+          { start: 0, end: localDomain.grid.ny },
+          { start: 0, end: localDomain.grid.nx }
+        ];
+
+    const reader = new OMapsFileReader(localDomain, localPartial);
+    reader
+      .init(baseUrl)
+      .then(() => {
+        const ctx: InitContext = {
+          domain: localDomain,
+          ranges: localRanges,
+          partial: localPartial,
+          dark: localDark,
+          mapBounds: localMapBounds,
+          reader
+        };
+        initContextsByKey.set(initKey, ctx);
+        resolve(ctx);
+      })
+      .catch((e) => {
+        reject(e);
+      });
+  }).finally(() => {
+    initPromisesByKey.delete(initKey);
+  });
+
+  initPromisesByKey.set(initKey, p);
+  return p;
+}
+
+async function readRawVariable(initKey: string, variableName: string): Promise<Float32Array> {
+  const varKey = `${initKey}::${variableName}`;
+  if (dataCacheByKey.has(varKey)) return dataCacheByKey.get(varKey)!;
+  if (variablePromisesByKey.has(varKey)) return variablePromisesByKey.get(varKey)!;
+
+  const ctx = initContextsByKey.get(initKey)!;
+  const p = ctx.reader
+    .readVariable({ value: variableName, label: variableName } as Variable, ctx.ranges)
+    .then((res) => {
+      const values = (res?.values as Float32Array) || new Float32Array();
+      dataCacheByKey.set(varKey, values);
+      return values;
+    })
+    .finally(() => {
+      variablePromisesByKey.delete(varKey);
+    });
+
+  variablePromisesByKey.set(varKey, p);
+  return p;
+}
+
+async function ensureVariableData(fullUrl: string): Promise<{ ctx: InitContext; varObj: Variable; values: Float32Array }> {
+  const { initKey, variableValue } = buildKeys(fullUrl);
+  const ctx = await ensureInit(fullUrl);
+
+  if (variableValue === 'wind_10m') {
+    const uVar = 'wind_u_component_10m';
+    const vVar = 'wind_v_component_10m';
+    const [u, v] = await Promise.all([
+      readRawVariable(initKey, uVar),
+      readRawVariable(initKey, vVar)
+    ]).catch(async () => {
+      // Fallback: lecture brute si U/V indisponibles
+      const fallback = await readRawVariable(initKey, 'wind_10m');
+      return [undefined as unknown as Float32Array, fallback] as unknown as [Float32Array, Float32Array];
+    });
+
+    if (u && v) {
+      const windKey = `${initKey}::wind_10m`;
+      if (dataCacheByKey.has(windKey)) {
+        const values = dataCacheByKey.get(windKey)!;
+        return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values };
+      }
+      const intensity = computeWindIntensity(u, v);
+      dataCacheByKey.set(windKey, intensity);
+      return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values: intensity };
+    } else {
+      // u/v manquants: v contient le fallback
+      return { ctx, varObj: { value: 'wind_10m', label: 'Average Wind 10m' }, values: v };
+    }
+  }
+
+  // Autres variables
+  const values = await readRawVariable(initKey, variableValue);
+  return { ctx, varObj: { value: variableValue, label: variableValue }, values };
+}
+
+/**
  * 📊 INTERFACE POUR LEAFLET
  * Format de retour optimisé pour Canvas HTML
  */
@@ -93,34 +223,6 @@ export interface LeafletTileData {
 	width: number;
 	height: number;
 	coords: { x: number; y: number; z: number };
-}
-
-/**
- * Déduplication + retry simple pour init
- */
-async function initOMFileForLeafletDedup(fullUrl: string): Promise<void> {
-  if (initPromisesByUrl.has(fullUrl)) {
-    return initPromisesByUrl.get(fullUrl)!;
-  }
-
-  const attempt = async (retry: number): Promise<void> => {
-    try {
-      await initOMFileForLeaflet(fullUrl);
-    } catch (e) {
-      if (retry > 0) {
-        console.warn('⏳ [LEAFLET-OM] init retry après erreur:', e);
-        await new Promise((r) => setTimeout(r, 200));
-        return attempt(retry - 1);
-      }
-      throw e;
-    }
-  };
-
-  const p = attempt(1).finally(() => {
-    initPromisesByUrl.delete(fullUrl);
-  });
-  initPromisesByUrl.set(fullUrl, p);
-  return p;
 }
 
 /**
@@ -143,22 +245,18 @@ export async function getTileForLeaflet(
 	console.log('🎯 [LEAFLET-OM] getTileForLeaflet() appelée:', {
 		coords: coords,
 		omUrl: omUrl.substring(0, 100) + '...',
-		cacheHit: cachedOmUrl === omUrl,
 		totalStart: totalTileStart
 	});
 
-	// 🔄 Initialiser les données OM si nécessaire (avec dédup + retry léger)
-	let dataLoadTime = 0;
-	if (cachedOmUrl !== omUrl || !cachedData) {
-		const dataLoadStart = performance.now();
-		console.log('📂 [LEAFLET-OM] Chargement des données OM (cache miss)');
-		await initOMFileForLeafletDedup(omUrl);
-		dataLoadTime = performance.now() - dataLoadStart;
-		console.log('✅ [LEAFLET-OM] Données OM chargées:', `${dataLoadTime.toFixed(2)}ms`);
-		cachedOmUrl = omUrl;
-	} else {
-		console.log('⚡ [LEAFLET-OM] Utilisation cache des données OM');
-	}
+	// 🔄 S'assurer que l'init est faite et obtenir la donnée variable
+	const dataLoadStart = performance.now();
+	const { ctx, varObj, values } = await ensureVariableData(omUrl);
+	const dataLoadTime = performance.now() - dataLoadStart;
+	console.log('✅ [LEAFLET-OM] Données prêtes:', {
+		variable: varObj.value,
+		length: values.length,
+		dataLoadTime: `${dataLoadTime.toFixed(2)}ms`
+	});
 
 	// 🗺️ Calculer les coordonnées géographiques de la tuile
 	const tileBounds = getTileBounds(coords);
@@ -171,7 +269,7 @@ export async function getTileForLeaflet(
 	});
 
 	// 🔧 Créer worker pour générer la tuile
-	const tileResult = await generateTileWithWorker(coords, tileBounds);
+	const tileResult = await generateTileWithWorker(coords, tileBounds, ctx, varObj, values);
 
 	const totalTileTime = performance.now() - totalTileStart;
 	console.log('🏁 [LEAFLET-OM] Tuile complète générée:', {
@@ -182,57 +280,6 @@ export async function getTileForLeaflet(
 	});
 
 	return tileResult;
-}
-
-/**
- * 🎯 Tuile de flèches pour Leaflet (overlay transparent)
- */
-export async function getTileForLeafletArrows(
-    coords: TileIndex,
-    omUrl: string,
-    gridSize?: number,
-    style?: WindArrowStyle
-): Promise<LeafletTileData> {
-    const totalTileStart = performance.now();
-    console.log('🎯 [LEAFLET-OM] getTileForLeafletArrows() appelée:', {
-        coords: coords,
-        omUrl: omUrl.substring(0, 100) + '...',
-        cacheHit: cachedOmUrl === omUrl && !!cachedWindUV,
-        totalStart: totalTileStart
-    });
-
-    // S'assurer que l'OM est initialisé (dédup + retry)
-    if (cachedOmUrl !== omUrl || !omapsFileReader) {
-        await initOMFileForLeafletDedup(omUrl);
-        cachedOmUrl = omUrl;
-    }
-
-    // Charger U/V si non présents dans le cache
-    if (!cachedWindUV || !cachedWindUV.u || !cachedWindUV.v) {
-        console.log('📂 [LEAFLET-OM] Chargement U/V pour flèches (cache miss)');
-        const uVar = { value: 'wind_u_component_10m', label: 'Wind U Component 10m' } as Variable;
-        const vVar = { value: 'wind_v_component_10m', label: 'Wind V Component 10m' } as Variable;
-        const [uData, vData] = await Promise.all([
-            omapsFileReader.readVariable(uVar, ranges),
-            omapsFileReader.readVariable(vVar, ranges)
-        ]);
-        if (!uData?.values || !vData?.values) {
-            throw new Error('U/V values not available for arrows');
-        }
-        cachedWindUV = { u: uData.values, v: vData.values };
-    }
-
-    // Bounds de la tuile
-    const tileBounds = getTileBounds(coords);
-
-    // Générer via worker
-    await acquireArrowsSlot();
-    try {
-        const tileResult = await generateArrowsTileWithWorker(coords, tileBounds, gridSize, style);
-        return tileResult;
-    } finally {
-        releaseArrowsSlot();
-    }
 }
 
 /**
@@ -352,11 +399,9 @@ async function initOMFileForLeaflet(fullUrl: string): Promise<void> {
 					}
 				}
 
-				// Chemin par défaut ou fallback: lire la variable telle quelle (si non déjà calculée)
-				if (!cachedData || !cachedData.values) {
-					const variableData = await omapsFileReader.readVariable(variable, ranges);
-					cachedData = variableData;
-				}
+				// Chemin par défaut ou fallback: lire la variable telle quelle
+				const variableData = await omapsFileReader.readVariable(variable, ranges);
+				cachedData = variableData;
 			})
 			.then(() => {
 				console.log('📊 [LEAFLET-OM] Données variables chargées:', {
@@ -400,7 +445,10 @@ function getTileBounds(coords: TileIndex): { north: number; south: number; east:
  */
 async function generateTileWithWorker(
 	coords: TileIndex,
-	tileBounds: { north: number; south: number; east: number; west: number }
+	tileBounds: { north: number; south: number; east: number; west: number },
+	ctx: InitContext,
+	varObj: Variable,
+	values: Float32Array
 ): Promise<LeafletTileData> {
 	return new Promise((resolve, reject) => {
 		const workerCreationStart = performance.now();
@@ -410,9 +458,7 @@ async function generateTileWithWorker(
 		const key = `leaflet_${coords.z}_${coords.x}_${coords.y}`;
 
 		// ⚠️ CORRECTION: Nettoyer tous les objets pour éviter les Proxy Svelte
-		const cleanData = cachedData ? {
-			values: cachedData.values // Extraire seulement les valeurs TypedArray
-		} : null;
+		const cleanData = { values };
 
 		const workerMessage = {
 			type: 'GT',
@@ -421,11 +467,11 @@ async function generateTileWithWorker(
 			z: coords.z,
 			key: key,
 			data: cleanData,
-			domain: JSON.parse(JSON.stringify(domain)), // Sérialiser les proxy Svelte
-			variable: JSON.parse(JSON.stringify(variable)),
-			ranges: ranges ? JSON.parse(JSON.stringify(ranges)) : null,
-			dark: dark,
-			mapBounds: mapBounds ? [...mapBounds] : [],
+			domain: JSON.parse(JSON.stringify(ctx.domain)),
+			variable: JSON.parse(JSON.stringify(varObj)),
+			ranges: ctx.ranges ? JSON.parse(JSON.stringify(ctx.ranges)) : null,
+			dark: ctx.dark,
+			mapBounds: ctx.mapBounds ? [...ctx.mapBounds] : [],
 			outputFormat: 'leaflet', // 🆕 Nouveau flag pour le format Leaflet
 			tileBounds: tileBounds   // 🆕 Bounds géographiques de la tuile
 		};
@@ -520,93 +566,6 @@ async function generateTileWithWorker(
 			reject(error);
 		}
 	});
-}
-
-/**
- * 🔧 Génération tuile flèches avec Worker (overlay transparent)
- */
-async function generateArrowsTileWithWorker(
-    coords: TileIndex,
-    tileBounds: { north: number; south: number; east: number; west: number },
-    gridSize?: number,
-    style?: WindArrowStyle
-): Promise<LeafletTileData> {
-    return new Promise((resolve, reject) => {
-        const workerCreationStart = performance.now();
-        console.log('🔧 [LEAFLET-OM] Création worker pour tuile flèches - Début:', workerCreationStart);
-
-        const worker = new TileWorker();
-        const key = `leaflet_arrows_${coords.z}_${coords.x}_${coords.y}`;
-
-        const workerMessage = {
-            type: 'GT',
-            mode: 'arrows',
-            x: coords.x,
-            y: coords.y,
-            z: coords.z,
-            key: key,
-            data: cachedWindUV ? { u: cachedWindUV.u, v: cachedWindUV.v } : null,
-            domain: JSON.parse(JSON.stringify(domain)),
-            variable: JSON.parse(JSON.stringify({ value: 'wind_10m', label: 'Average Wind 10m' } as Variable)),
-            ranges: ranges ? JSON.parse(JSON.stringify(ranges)) : null,
-            dark: dark,
-            mapBounds: mapBounds ? [...mapBounds] : [],
-            outputFormat: 'leaflet',
-            tileBounds: tileBounds,
-            gridSize: gridSize,
-            arrowStyle: style
-        } as unknown as {
-            type: string;
-            mode: string;
-            x: number; y: number; z: number;
-            key: string;
-            data: { u: TypedArray; v: TypedArray } | null;
-            domain: Domain;
-            variable: Variable;
-            ranges: Range[] | null;
-            dark: boolean;
-            mapBounds: number[];
-            outputFormat: string;
-            tileBounds: { north: number; south: number; east: number; west: number };
-            gridSize?: number;
-            arrowStyle?: WindArrowStyle;
-        };
-
-        // Timeout
-        const workerTimeout = setTimeout(() => {
-            console.warn('⏰ [LEAFLET-OM] TIMEOUT worker flèches après 8s');
-            worker.terminate();
-            reject(new Error('Worker timeout (arrows) after 8 seconds'));
-        }, 8000);
-
-        worker.onmessage = (message) => {
-            clearTimeout(workerTimeout);
-            if (message.data.type === 'RT' && message.data.key === key) {
-                const tileData: LeafletTileData = {
-                    rgba: message.data.rgba,
-                    width: TILE_SIZE,
-                    height: TILE_SIZE,
-                    coords: coords
-                };
-                worker.terminate();
-                resolve(tileData);
-            }
-        };
-
-        worker.onerror = (error) => {
-            clearTimeout(workerTimeout);
-            worker.terminate();
-            reject(error);
-        };
-
-        try {
-            worker.postMessage(workerMessage);
-        } catch (error) {
-            clearTimeout(workerTimeout);
-            worker.terminate();
-            reject(error);
-        }
-    });
 }
 
 /**

@@ -26,7 +26,7 @@ export async function createOMapsLayer(options: OMapsLayerOptions): Promise<any>
   const L = await import('leaflet');
 
   // Vérification pour les tests - si GridLayer n'est pas disponible, on crée un mock
-  if (!L.GridLayer) {
+  if (!L.GridLayer && typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
     return {
       options,
       addTo: () => {},
@@ -81,7 +81,7 @@ export async function createOMapsLayer(options: OMapsLayerOptions): Promise<any>
     }
   });
 
-  return new (OMapsLayer as any)(options);
+  return new OMapsLayer(options);
 }
 
 /**
@@ -101,10 +101,10 @@ export async function createOMapsLayerWithWorker(options: OMapsLayerOptions): Pr
   });
 
   const L = await import('leaflet');
-  const { getTileForLeaflet, getTileForLeafletArrows, rgbaToCanvas } = await import('./leaflet-om-protocol');
+  const { getTileForLeaflet, rgbaToCanvas } = await import('./leaflet-om-protocol');
 
   // Vérification pour les tests
-  if (!L.GridLayer) {
+  if (!L.GridLayer && typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
     return {
       options,
       addTo: () => {},
@@ -249,93 +249,5 @@ export async function createOMapsLayerWithWorker(options: OMapsLayerOptions): Pr
     }
   });
 
-  return new (OMapsWorkerLayer as any)(options);
-}
-
-/**
- * 🚀 Couche de flèches (overlay) avec Worker
- */
-export async function createWindArrowsLayerWithWorker(options: OMapsLayerOptions & { gridSize?: number }): Promise<any> {
-  if (!browser) {
-    throw new Error('OMapsLayer can only be created in the browser');
-  }
-
-  console.log('🚀 [OMAPS-LAYER] Création couche flèches avec worker:', {
-    omUrl: options.omUrl?.substring(0, 100) + '...',
-    domain: options.domain?.value,
-    variable: options.variable?.value,
-    opacity: options.opacity,
-    gridSize: options.gridSize
-  });
-
-  const L = await import('leaflet');
-  const { rgbaToCanvas } = await import('./leaflet-om-protocol');
-  const { getTileForLeafletArrows } = await import('./leaflet-om-protocol');
-
-  if (!L.GridLayer) {
-    return {
-      options,
-      addTo: () => {},
-      redraw: () => {},
-      updateOptions: (newOptions: Partial<OMapsLayerOptions>) => {
-        Object.assign(options, newOptions);
-      }
-    };
-  }
-
-  const WindArrowsWorkerLayer = L.GridLayer.extend({
-    options: {
-      ...options,
-      opacity: options.opacity || 1
-    },
-
-    initialize: function(opts: OMapsLayerOptions & { gridSize?: number }) {
-      L.setOptions(this, opts);
-    },
-
-    createTile: function(coords: any, done: Function) {
-      const canvas = document.createElement('canvas');
-      const tileSize = this.getTileSize();
-      canvas.width = tileSize.x;
-      canvas.height = tileSize.y;
-
-      if (!this.options.omUrl) {
-        // Tuile vide transparente
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, tileSize.x, tileSize.y);
-        }
-        setTimeout(() => done(null, canvas), 0);
-        return canvas;
-      }
-
-      getTileForLeafletArrows(coords, this.options.omUrl, this.options.gridSize, (this.options as any).arrowStyle)
-        .then((tileData) => {
-          const arrowsCanvas = rgbaToCanvas(tileData);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(arrowsCanvas, 0, 0);
-          }
-          done(null, canvas);
-        })
-        .catch((error) => {
-          console.error('❌ [OMAPS-LAYER] Erreur génération tuile flèches:', error);
-          // Tuile transparente en fallback
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.clearRect(0, 0, tileSize.x, tileSize.y);
-          }
-          done(null, canvas);
-        });
-
-      return canvas;
-    },
-
-    updateOptions: function(newOptions: Partial<OMapsLayerOptions>) {
-      L.setOptions(this, { ...this.options, ...newOptions });
-      this.redraw();
-    }
-  });
-
-  return new (WindArrowsWorkerLayer as any)(options);
+  return new OMapsWorkerLayer(options);
 }
