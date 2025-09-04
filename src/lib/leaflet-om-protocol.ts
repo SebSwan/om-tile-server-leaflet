@@ -542,6 +542,7 @@ async function generateTileWithWorker(
 				expectedKey: key,
 				hasRgba: !!message.data.rgba,
 				rgbaLength: message.data.rgba?.length || 0,
+				rgbaBytes: message.data.rgba?.byteLength || 0,
 				workerInternalTime: message.data.processingTime ? `${message.data.processingTime.toFixed(2)}ms` : 'N/A'
 			});
 
@@ -563,6 +564,7 @@ async function generateTileWithWorker(
 
 				console.log('✅ [LEAFLET-OM] Tuile Leaflet générée avec succès:', {
 					rgbaLength: tileData.rgba.length,
+					rgbaBytes: tileData.rgba.byteLength,
 					expectedLength: TILE_SIZE * TILE_SIZE * 4,
 					dimensions: `${tileData.width}x${tileData.height}`,
 					totalWorkerLifetime: `${totalWorkerLifetime.toFixed(2)}ms`,

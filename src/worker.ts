@@ -5,6 +5,7 @@ import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/p
 import { tile2lat, tile2lon, getIndexFromLatLong } from '$lib/utils/math';
 
 import { getColorScale, getInterpolator } from '$lib/utils/color-scales';
+import type { TypedArray } from '@openmeteo/file-reader';
 import { interpolateLinear } from '$lib/utils/interpolations';
 
 import type { ColorScale, Domain, IndexAndFractions } from '$lib/types';
@@ -286,8 +287,8 @@ self.onmessage = async (message) => {
 
 								if (!Number.isFinite(index)) continue;
 
-								const uVal = interpolateLinear(uArr as unknown as any, nx, index, xFraction, yFraction);
-								const vVal = interpolateLinear(vArr as unknown as any, nx, index, xFraction, yFraction);
+								const uVal = interpolateLinear(uArr as unknown as TypedArray, nx, index, xFraction, yFraction);
+								const vVal = interpolateLinear(vArr as unknown as TypedArray, nx, index, xFraction, yFraction);
 								if (!Number.isFinite(uVal) || !Number.isFinite(vVal)) continue;
 
 								const speed = Math.hypot(uVal, vVal);
@@ -343,7 +344,8 @@ self.onmessage = async (message) => {
 			console.log('🍃 [WORKER] Format Leaflet - Retour RGBA directement:', {
 				processingTime: `${totalProcessingTime.toFixed(2)}ms`,
 				pixelsGenerated: TILE_SIZE * TILE_SIZE,
-				rgbaSize: rgba.length
+				rgbaSize: rgba.length,
+				rgbaBytes: rgba.byteLength
 			});
 			postMessage({
 				type: 'RT',
@@ -355,7 +357,8 @@ self.onmessage = async (message) => {
 			});
 		} else {
 			console.log('🗺️ [WORKER] Format MapLibre - Création ImageBitmap:', {
-				processingTime: `${totalProcessingTime.toFixed(2)}ms`
+				processingTime: `${totalProcessingTime.toFixed(2)}ms`,
+				approxImageBytes: TILE_SIZE * TILE_SIZE * 4
 			});
 			const tile = await createImageBitmap(new ImageData(rgba, TILE_SIZE, TILE_SIZE));
 			postMessage({
