@@ -1,84 +1,24 @@
 {
-	"name": "@openmeteo/maplibre-om-protocol",
-	"version": "0.0.1",
-	"type": "module",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"author": "Open-Meteo <info@open-meteo.com>",
-	"module": "dist/index.js",
-	"repository": "git://github.com/open-meteo/maps",
-	"description": "Protocol to read OMfiles and parse them to tiles for Mapbox / Maplibre",
-	"keywords": [
-		"open-meteo",
-		"meteorological-data",
-		"weather-maps",
-		"om-file"
-	],
-	"files": [
-		"build"
-	],
-	"scripts": {
-		"dev": "vite dev",
-		"build": "vite build",
-		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint .",
-		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run",
-		"test:leaflet": "vitest src/lib/tests/leaflet-migration.test.ts src/lib/tests/tile-coordinates.test.ts --run",
-		"test:watch": "vitest src/lib/tests/ --watch"
-	},
-	"devDependencies": {
-		"@eslint/compat": "^1.1.0",
-		"@eslint/js": "^9.18.0",
-		"@internationalized/date": "^3.8.1",
-		"@lucide/svelte": "^0.515.0",
-		"@openmeteo/file-reader": "^0.0.10",
-		"@sveltejs/adapter-static": "^3.0.8",
-		"@sveltejs/kit": "^2.22.0",
-		"@sveltejs/vite-plugin-svelte": "^6.0.0",
-		"@tailwindcss/forms": "^0.5.9",
-		"@tailwindcss/typography": "^0.5.15",
-		"@tailwindcss/vite": "^4.0.0",
-		"@vitest/browser": "^3.2.3",
-		"jsdom": "^25.0.1",
-		"bits-ui": "^2.8.6",
-		"clsx": "^2.1.1",
-		"d3": "^7.9.0",
-		"eslint": "^9.18.0",
-		"eslint-config-prettier": "^10.0.1",
-		"eslint-plugin-svelte": "^3.0.0",
-		"globals": "^16.0.0",
-		"leaflet": "^1.9.4",
-		"@types/leaflet": "^1.9.8",
-		"mdsvex": "^0.12.3",
-		"mode-watcher": "^1.1.0",
-		"playwright": "^1.53.0",
-		"prettier": "^3.4.2",
-		"prettier-plugin-svelte": "^3.3.3",
-		"prettier-plugin-tailwindcss": "^0.6.11",
-		"svelte": "^5.0.0",
-		"svelte-check": "^4.0.0",
-		"svelte-sonner": "^1.0.5",
-		"tailwind-merge": "^3.3.1",
-		"tailwind-variants": "^1.0.0",
-		"tailwindcss": "^4.0.0",
-		"tw-animate-css": "^1.3.6",
-		"typescript": "^5.0.0",
-		"typescript-eslint": "^8.20.0",
-		"vaul-svelte": "1.0.0-next.7",
-		"vite": "^7.0.4",
-		"vite-plugin-devtools-json": "^0.2.0",
-		"vite-plugin-dts": "^4.5.4",
-		"vitest": "^3.2.3",
-		"vitest-browser-svelte": "^0.1.0"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"esbuild"
-		]
-	}
+  "name": "tile-server-om",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/server/index.ts",
+    "build": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "test": "node --test --loader tsx tests/server/*.test.ts"
+  },
+  "dependencies": {
+    "@openmeteo/file-format-wasm": "^0.0.11",
+    "@openmeteo/file-reader": "^0.0.11",
+    "d3": "^7.9.0",
+    "fastify": "^4.28.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
 }
