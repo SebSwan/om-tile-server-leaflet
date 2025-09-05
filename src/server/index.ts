@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import { registerTileRoutes } from './routes';
 import { setupGlobalCache } from '@openmeteo/file-reader';
 
@@ -7,6 +8,14 @@ import { setupGlobalCache } from '@openmeteo/file-reader';
 setupGlobalCache();
 
 const server = Fastify({ logger: true });
+
+await server.register(cors, {
+  origin: '*',
+  methods: ['GET', 'OPTIONS'],
+  credentials: false,
+  allowedHeaders: ['*'],
+  hook: 'onRequest'
+});
 
 registerTileRoutes(server);
 

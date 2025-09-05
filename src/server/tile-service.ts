@@ -6,6 +6,7 @@ import { tileBoundsFromZXY } from './om-url';
 import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
 import { encodeRgbaToPng } from './png';
 import { OmHttpBackend, OmDataType, FileBackendNode, OmFileReader, type TypedArray } from '@openmeteo/file-reader';
+import { dbg, timeStart, timeEnd } from './log';
 
 export type Zxy = { z: number; x: number; y: number };
 
@@ -58,6 +59,7 @@ export function renderRgbaTile(
   values: Float32Array,
   ranges: Range[]
 ): Uint8Array {
+  dbg('renderRgbaTile:start', { coords, domain: domain.value, variable: variable.value, nx: domain.grid.nx, ny: domain.grid.ny, ranges });
   const colorScale = getColorScale(variable);
   const interpolator = getInterpolator(colorScale);
 
@@ -95,22 +97,34 @@ export function renderRgbaTile(
     }
   }
 
+  dbg('renderRgbaTile:end', { filled: rgba.length });
   return rgba;
 }
 
 export async function readVariableValues(omUrl: string, variable: Variable, ranges: Range[]): Promise<Float32Array> {
+  dbg('readVariableValues:start', { omUrl, variable: variable.value, ranges });
   // Priorité aux tests locaux via un fichier .om fourni
   const localPath = process.env.OM_FILE_PATH;
   let reader: OmFileReader;
   if (localPath) {
+    dbg('readVariableValues:FileBackendNode', { localPath });
     const fb = new FileBackendNode(localPath);
+    const t0 = timeStart('OmFileReader.create');
     reader = await OmFileReader.create(fb);
+    timeEnd('OmFileReader.create', t0);
   } else {
     const backend = new OmHttpBackend({ url: omUrl, eTagValidation: false });
+    const t1 = timeStart('OmHttpBackend.asCachedReader');
     reader = await backend.asCachedReader();
+    timeEnd('OmHttpBackend.asCachedReader', t1);
   }
+  const t2 = timeStart('getChildByName');
   const child = await reader.getChildByName(variable.value);
+  timeEnd('getChildByName', t2);
+  const t3 = timeStart('read(FloatArray)');
   const floatArray = await child.read(OmDataType.FloatArray, ranges);
+  timeEnd('read(FloatArray)', t3);
+  dbg('readVariableValues:end', { length: (floatArray as Float32Array)?.length });
   return floatArray as Float32Array;
 }
 
@@ -118,13 +132,19 @@ export async function generateTilePngFromRoute(
   params: { domain: string; variable: string } & Zxy,
   omUrl: string
 ): Promise<Buffer> {
+  const t0 = timeStart('generateTilePngFromRoute');
   const domain = pickDomain(params.domain);
   const variable: Variable = { value: params.variable, label: params.variable };
   // Lecture partielle basée sur la tuile
   const ranges = computeRangesForTile({ z: params.z, x: params.x, y: params.y }, domain);
+  dbg('generateTilePngFromRoute:ranges', { ranges });
   const values = await readVariableValues(omUrl, variable, ranges);
   const rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, variable, values, ranges);
-  return encodeRgbaToPng(rgba, TILE_SIZE, TILE_SIZE);
+  const t1 = timeStart('encodeRgbaToPng');
+  const png = encodeRgbaToPng(rgba, TILE_SIZE, TILE_SIZE);
+  timeEnd('encodeRgbaToPng', t1);
+  timeEnd('generateTilePngFromRoute', t0);
+  return png;
 }
 
 
