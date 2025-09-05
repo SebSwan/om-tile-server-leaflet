@@ -181,21 +181,21 @@ export function overlayWindArrowsOnRgba({
       const angle = Math.atan2(-vVal, uVal);
       const len = scale * stepPx * (0.6 + 0.4 * Math.min(1, speed / 10));
 
-      const cx = Math.round(px + 0.5);
-      const cy = Math.round(py + 0.5);
-      const x0 = Math.round(cx - len * 0.3 * Math.cos(angle));
-      const y0 = Math.round(cy - len * 0.3 * Math.sin(angle));
-      const x1 = Math.round(cx + len * 0.7 * Math.cos(angle));
-      const y1 = Math.round(cy + len * 0.7 * Math.sin(angle));
-      drawLineAA(rgba, x0, y0, x1, y1, color, alpha);
+      const cx = px + 0.5;
+      const cy = py + 0.5;
+      const x0 = cx - len * 0.3 * Math.cos(angle);
+      const y0 = cy - len * 0.3 * Math.sin(angle);
+      const x1 = cx + len * 0.7 * Math.cos(angle);
+      const y1 = cy + len * 0.7 * Math.sin(angle);
+      drawLineAA(rgba, x0 as number, y0 as number, x1 as number, y1 as number, color, alpha);
       // Pointe fidèle à l'ancien worker:
       // depuis (0.7*len, 0) vers (0.5*len, ±0.18*len) dans le repère tourné
-      const x2 = Math.round(cx + len * (0.5 * Math.cos(angle) + 0.18 * Math.sin(angle)));
-      const y2 = Math.round(cy + len * (0.5 * Math.sin(angle) - 0.18 * Math.cos(angle)));
-      const x3 = Math.round(cx + len * (0.5 * Math.cos(angle) - 0.18 * Math.sin(angle)));
-      const y3 = Math.round(cy + len * (0.5 * Math.sin(angle) + 0.18 * Math.cos(angle)));
-      drawLineAA(rgba, x1, y1, x2, y2, color, alpha);
-      drawLineAA(rgba, x1, y1, x3, y3, color, alpha);
+      const x2 = cx + len * (0.5 * Math.cos(angle) + 0.18 * Math.sin(angle));
+      const y2 = cy + len * (0.5 * Math.sin(angle) - 0.18 * Math.cos(angle));
+      const x3 = cx + len * (0.5 * Math.cos(angle) - 0.18 * Math.sin(angle));
+      const y3 = cy + len * (0.5 * Math.sin(angle) + 0.18 * Math.cos(angle));
+      drawLineAA(rgba, x1 as number, y1 as number, x2 as number, y2 as number, color, alpha);
+      drawLineAA(rgba, x1 as number, y1 as number, x3 as number, y3 as number, color, alpha);
     }
   }
 
