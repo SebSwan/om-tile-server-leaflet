@@ -188,11 +188,12 @@ export function overlayWindArrowsOnRgba({
       const x1 = Math.round(cx + len * 0.7 * Math.cos(angle));
       const y1 = Math.round(cy + len * 0.7 * Math.sin(angle));
       drawLineAA(rgba, x0, y0, x1, y1, color, alpha);
-      // Pointe
-      const x2 = Math.round(cx + len * 0.5 * Math.cos(angle - Math.PI * 0.18));
-      const y2 = Math.round(cy + len * 0.5 * Math.sin(angle - Math.PI * 0.18));
-      const x3 = Math.round(cx + len * 0.5 * Math.cos(angle + Math.PI * 0.18));
-      const y3 = Math.round(cy + len * 0.5 * Math.sin(angle + Math.PI * 0.18));
+      // Pointe fidèle à l'ancien worker:
+      // depuis (0.7*len, 0) vers (0.5*len, ±0.18*len) dans le repère tourné
+      const x2 = Math.round(cx + len * (0.5 * Math.cos(angle) + 0.18 * Math.sin(angle)));
+      const y2 = Math.round(cy + len * (0.5 * Math.sin(angle) - 0.18 * Math.cos(angle)));
+      const x3 = Math.round(cx + len * (0.5 * Math.cos(angle) - 0.18 * Math.sin(angle)));
+      const y3 = Math.round(cy + len * (0.5 * Math.sin(angle) + 0.18 * Math.cos(angle)));
       drawLineAA(rgba, x1, y1, x2, y2, color, alpha);
       drawLineAA(rgba, x1, y1, x3, y3, color, alpha);
     }
