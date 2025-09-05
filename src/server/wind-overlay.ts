@@ -23,10 +23,14 @@ function getNxFromRanges(domain: Domain, ranges: Range[]): number {
 }
 
 function blendPixel(rgba: Uint8Array, idx: number, r: number, g: number, b: number, a: number) {
-  const srcA = a;
+  const srcA = Math.max(0, Math.min(1, a));
   const dstA = rgba[idx + 3] / 255;
   const outA = srcA + dstA * (1 - srcA);
-  const blend = (src: number, dst: number) => (src * srcA + dst * dstA * (1 - srcA)) / (outA || 1);
+  if (outA <= 0) {
+    rgba[idx + 0] = 0; rgba[idx + 1] = 0; rgba[idx + 2] = 0; rgba[idx + 3] = 0;
+    return;
+  }
+  const blend = (src: number, dst: number) => (src * srcA + dst * dstA * (1 - srcA)) / outA;
   const outR = blend(r, rgba[idx + 0]);
   const outG = blend(g, rgba[idx + 1]);
   const outB = blend(b, rgba[idx + 2]);
@@ -36,21 +40,86 @@ function blendPixel(rgba: Uint8Array, idx: number, r: number, g: number, b: numb
   rgba[idx + 3] = Math.round(outA * 255);
 }
 
-function drawLine(rgba: Uint8Array, x0: number, y0: number, x1: number, y1: number, color: [number, number, number], alpha: number) {
-  let dx = Math.abs(x1 - x0);
-  let dy = -Math.abs(y1 - y0);
-  let sx = x0 < x1 ? 1 : -1;
-  let sy = y0 < y1 ? 1 : -1;
-  let err = dx + dy;
-  while (true) {
-    if (x0 >= 0 && x0 < TILE_SIZE && y0 >= 0 && y0 < TILE_SIZE) {
-      const idx = (y0 * TILE_SIZE + x0) * 4;
-      blendPixel(rgba, idx, color[0], color[1], color[2], alpha);
+// Xiaolin Wu anti-aliased line drawing
+function drawLineAA(
+  rgba: Uint8Array,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: [number, number, number],
+  alpha: number
+) {
+  const ipart = (x: number) => Math.floor(x);
+  const roundN = (x: number) => Math.round(x);
+  const fpart = (x: number) => x - Math.floor(x);
+  const rfpart = (x: number) => 1 - fpart(x);
+
+  const plot = (x: number, y: number, c: number) => {
+    if (x >= 0 && x < TILE_SIZE && y >= 0 && y < TILE_SIZE) {
+      const idx = (y * TILE_SIZE + x) * 4;
+      blendPixel(rgba, idx, color[0], color[1], color[2], alpha * c);
     }
-    if (x0 === x1 && y0 === y1) break;
-    const e2 = 2 * err;
-    if (e2 >= dy) { err += dy; x0 += sx; }
-    if (e2 <= dx) { err += dx; y0 += sy; }
+  };
+
+  let steep = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+  if (steep) {
+    [x0, y0] = [y0, x0];
+    [x1, y1] = [y1, x1];
+  }
+  if (x0 > x1) {
+    [x0, x1] = [x1, x0];
+    [y0, y1] = [y1, y0];
+  }
+
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const gradient = dx === 0 ? 1 : dy / dx;
+
+  // first endpoint
+  let xend = roundN(x0);
+  let yend = y0 + gradient * (xend - x0);
+  let xgap = rfpart(x0 + 0.5);
+  let xpxl1 = xend;
+  let ypxl1 = ipart(yend);
+  if (steep) {
+    plot(ypxl1, xpxl1, rfpart(yend) * xgap);
+    plot(ypxl1 + 1, xpxl1, fpart(yend) * xgap);
+  } else {
+    plot(xpxl1, ypxl1, rfpart(yend) * xgap);
+    plot(xpxl1, ypxl1 + 1, fpart(yend) * xgap);
+  }
+  let intery = yend + gradient;
+
+  // second endpoint
+  xend = roundN(x1);
+  yend = y1 + gradient * (xend - x1);
+  xgap = fpart(x1 + 0.5);
+  const xpxl2 = xend;
+  const ypxl2 = ipart(yend);
+  if (steep) {
+    plot(ypxl2, xpxl2, rfpart(yend) * xgap);
+    plot(ypxl2 + 1, xpxl2, fpart(yend) * xgap);
+  } else {
+    plot(xpxl2, ypxl2, rfpart(yend) * xgap);
+    plot(xpxl2, ypxl2 + 1, fpart(yend) * xgap);
+  }
+
+  // main loop
+  if (steep) {
+    for (let x = xpxl1 + 1; x <= xpxl2 - 1; x++) {
+      const yI = ipart(intery);
+      plot(yI, x, rfpart(intery));
+      plot(yI + 1, x, fpart(intery));
+      intery += gradient;
+    }
+  } else {
+    for (let x = xpxl1 + 1; x <= xpxl2 - 1; x++) {
+      const yI = ipart(intery);
+      plot(x, yI, rfpart(intery));
+      plot(x, yI + 1, fpart(intery));
+      intery += gradient;
+    }
   }
 }
 
@@ -118,14 +187,14 @@ export function overlayWindArrowsOnRgba({
       const y0 = Math.round(cy - len * 0.3 * Math.sin(angle));
       const x1 = Math.round(cx + len * 0.7 * Math.cos(angle));
       const y1 = Math.round(cy + len * 0.7 * Math.sin(angle));
-      drawLine(rgba, x0, y0, x1, y1, color, alpha);
+      drawLineAA(rgba, x0, y0, x1, y1, color, alpha);
       // Pointe
       const x2 = Math.round(cx + len * 0.5 * Math.cos(angle - Math.PI * 0.18));
       const y2 = Math.round(cy + len * 0.5 * Math.sin(angle - Math.PI * 0.18));
       const x3 = Math.round(cx + len * 0.5 * Math.cos(angle + Math.PI * 0.18));
       const y3 = Math.round(cy + len * 0.5 * Math.sin(angle + Math.PI * 0.18));
-      drawLine(rgba, x1, y1, x2, y2, color, alpha);
-      drawLine(rgba, x1, y1, x3, y3, color, alpha);
+      drawLineAA(rgba, x1, y1, x2, y2, color, alpha);
+      drawLineAA(rgba, x1, y1, x3, y3, color, alpha);
     }
   }
 
