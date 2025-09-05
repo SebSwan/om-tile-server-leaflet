@@ -7,10 +7,72 @@ import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/p
 import { encodeRgbaToPng } from './png';
 import { OmHttpBackend, OmDataType, FileBackendNode, OmFileReader, type TypedArray } from '@openmeteo/file-reader';
 import { dbg, timeStart, timeEnd } from './log';
+import { overlayWindArrowsOnRgba } from './wind-overlay';
 
 export type Zxy = { z: number; x: number; y: number };
 
 const TILE_SIZE = 256;
+
+// --- Wind helpers & cache ---
+const WIND_CACHE_TTL_MS = Number(process.env.WIND_CACHE_TTL_MS ?? 120_000);
+type CacheEntry = { ts: number; data: Float32Array };
+const variableCacheByKey = new Map<string, CacheEntry>();
+
+function computeWindIntensity(u: Float32Array, v: Float32Array): Float32Array {
+  const n = Math.min(u.length, v.length);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const uu = u[i];
+    const vv = v[i];
+    out[i] = Number.isFinite(uu) && Number.isFinite(vv) ? Math.hypot(uu, vv) : NaN;
+  }
+  return out;
+}
+
+function rangesKey(ranges: Range[]): string {
+  const r0 = ranges[0];
+  const r1 = ranges[1];
+  return `${r0.start}-${r0.end}|${r1.start}-${r1.end}`;
+}
+
+function normalizeUrlWithoutVariable(omUrl: string): string {
+  const u = new URL(omUrl);
+  // Remove variable param
+  u.searchParams.delete('variable');
+  // Sort remaining params for stable key
+  const sorted = new URLSearchParams();
+  Array.from(u.searchParams.keys())
+    .sort()
+    .forEach((k) => {
+      const vals = u.searchParams.getAll(k);
+      vals.forEach((val) => sorted.append(k, val));
+    });
+  const qs = sorted.toString();
+  return `${u.origin}${u.pathname}${qs ? `?${qs}` : ''}`;
+}
+
+function cloneOmUrlWithVariable(omUrl: string, variableName: string): string {
+  const u = new URL(omUrl);
+  u.searchParams.set('variable', variableName);
+  return u.toString();
+}
+
+async function readVariableValuesCached(
+  omUrl: string,
+  variableName: string,
+  ranges: Range[]
+): Promise<Float32Array> {
+  const base = normalizeUrlWithoutVariable(omUrl);
+  const key = `${base}|${variableName}|${rangesKey(ranges)}`;
+  const now = Date.now();
+  const cached = variableCacheByKey.get(key);
+  if (cached && now - cached.ts < WIND_CACHE_TTL_MS) {
+    return cached.data;
+  }
+  const data = await readVariableValues(cloneOmUrlWithVariable(omUrl, variableName), { value: variableName, label: variableName }, ranges);
+  variableCacheByKey.set(key, { ts: now, data });
+  return data;
+}
 
 function pickDomain(domainValue: string): Domain {
   const d = knownDomains.find((dm) => dm.value === domainValue);
@@ -48,7 +110,23 @@ function mapValueToColor(variable: Variable, value: number, colorScale = getColo
     Math.max(0, Math.floor((value - colorScale.min) / colorScale.scalefactor))
   );
   const color = colorScale.colors[idx] || [0, 0, 0];
-  const a = 255; // POC: opacité pleine
+  const opacityPct = Math.max(0, Math.min(100, Number(process.env.OPACITY ?? 100)));
+  const opacityFactor = opacityPct / 100;
+
+  let alphaFactor = 1; // par défaut, opacité pleine comme avant
+  const v = variable.value || '';
+  if (v === 'cloud_cover' || v.startsWith('cloud') || v === 'thunderstorm_probability' || v.startsWith('thunderstorm')) {
+    // Ancienne règle: alpha ~ px^1.5 / 1000
+    alphaFactor = Math.max(0, Math.min(1, Math.pow(value, 1.5) / 1000));
+  } else if (v.startsWith('wind')) {
+    // Ancienne règle: alpha croît de 2 à 14 (ici unités m/s comme demandé)
+    alphaFactor = Math.max(0, Math.min(1, (value - 2) / 12));
+  } else if (v.startsWith('precipitation') || v.startsWith('rain')) {
+    // Ancienne règle: alpha croît jusqu'à 1.5
+    alphaFactor = Math.max(0, Math.min(1, value / 1.5));
+  }
+
+  const a = Math.round(255 * opacityFactor * alphaFactor);
   return [color[0], color[1], color[2], a];
 }
 
@@ -91,7 +169,7 @@ export function renderRgbaTile(
         continue;
       }
 
-      const v = interpolator(values as unknown as TypedArray, nx, index, xFraction, yFraction);
+      const v = interpolator(values as unknown as Float32Array, nx, index, xFraction, yFraction);
       const [r, g, b, a] = mapValueToColor(variable, v, colorScale);
       rgba[idxPix + 0] = r; rgba[idxPix + 1] = g; rgba[idxPix + 2] = b; rgba[idxPix + 3] = a;
     }
@@ -120,6 +198,9 @@ export async function readVariableValues(omUrl: string, variable: Variable, rang
   }
   const t2 = timeStart('getChildByName');
   const child = await reader.getChildByName(variable.value);
+  if (!child) {
+    throw new Error(`Variable not found: ${variable.value}`);
+  }
   timeEnd('getChildByName', t2);
   const t3 = timeStart('read(FloatArray)');
   const floatArray = await child.read(OmDataType.FloatArray, ranges);
@@ -138,8 +219,43 @@ export async function generateTilePngFromRoute(
   // Lecture partielle basée sur la tuile
   const ranges = computeRangesForTile({ z: params.z, x: params.x, y: params.y }, domain);
   dbg('generateTilePngFromRoute:ranges', { ranges });
-  const values = await readVariableValues(omUrl, variable, ranges);
-  const rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, variable, values, ranges);
+  let rgba: Uint8Array;
+  if (variable.value === 'wind_10m') {
+    try {
+      const [u, v] = await Promise.all([
+        readVariableValuesCached(omUrl, 'wind_u_component_10m', ranges),
+        readVariableValuesCached(omUrl, 'wind_v_component_10m', ranges)
+      ]);
+      const intensity = computeWindIntensity(u, v);
+      rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, { value: 'wind_10m', label: 'wind_10m' }, intensity, ranges);
+      // Flèches par défaut activées
+      rgba = overlayWindArrowsOnRgba({
+        rgba,
+        coords: { z: params.z, x: params.x, y: params.y },
+        domain,
+        ranges,
+        u,
+        v,
+        options: {
+          stepPx: Number(process.env.WIND_ARROW_STEP ?? 16),
+          minZoom: Number(process.env.WIND_ARROW_MIN_ZOOM ?? 4),
+          minSpeed: Number(process.env.WIND_ARROW_MIN_SPEED ?? 2),
+          scale: Number(process.env.WIND_ARROW_SCALE ?? 0.6),
+          alphaMin: Number(process.env.WIND_ARROW_ALPHA_MIN ?? 0.4),
+          alphaMax: Number(process.env.WIND_ARROW_ALPHA_MAX ?? 0.9),
+          color: [0, 0, 0]
+        }
+      });
+    } catch (e) {
+      // Fallback lecture brute
+      dbg('wind_10m:fallback', { reason: 'U/V missing', err: String(e) });
+      const values = await readVariableValues(omUrl, { value: 'wind_10m', label: 'wind_10m' }, ranges);
+      rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, { value: 'wind_10m', label: 'wind_10m' }, values, ranges);
+    }
+  } else {
+    const values = await readVariableValues(omUrl, variable, ranges);
+    rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, variable, values, ranges);
+  }
   const t1 = timeStart('encodeRgbaToPng');
   const png = encodeRgbaToPng(rgba, TILE_SIZE, TILE_SIZE);
   timeEnd('encodeRgbaToPng', t1);
