@@ -18,6 +18,31 @@ const WIND_CACHE_TTL_MS = Number(process.env.WIND_CACHE_TTL_MS ?? 120_000);
 type CacheEntry = { ts: number; data: Float32Array };
 const variableCacheByKey = new Map<string, CacheEntry>();
 
+// Pool de readers (partagé U/V et entre tuiles pour un même fichier .om)
+const readerPromiseByKey = new Map<string, Promise<OmFileReader>>();
+
+// --- Metrics batch (agrégation courte) ---
+const METRICS_IDLE_MS = Number(process.env.METRICS_IDLE_MS ?? 400);
+const ENABLE_METRICS = (process.env.METRICS ?? '1') !== '0';
+let metrics = { tiles: 0, totalMs: 0, cacheHits: 0, cacheMisses: 0 };
+let metricsTimer: NodeJS.Timeout | null = null;
+
+function bumpCacheHit() { metrics.cacheHits++; }
+function bumpCacheMiss() { metrics.cacheMisses++; }
+function bumpTile(durationMs: number) { metrics.tiles++; metrics.totalMs += durationMs; }
+function scheduleEmitMetrics() {
+  if (!ENABLE_METRICS) return;
+  if (metricsTimer) clearTimeout(metricsTimer);
+  metricsTimer = setTimeout(() => {
+    const reads = metrics.cacheHits + metrics.cacheMisses;
+    const ratio = reads > 0 ? metrics.cacheHits / reads : 0;
+    const avg = metrics.tiles > 0 ? metrics.totalMs / metrics.tiles : 0;
+    dbg('metrics:batch', { tiles: metrics.tiles, avgMs: Math.round(avg), cacheHits: metrics.cacheHits, cacheMisses: metrics.cacheMisses, cacheRatio: Number(ratio.toFixed(3)) });
+    metrics = { tiles: 0, totalMs: 0, cacheHits: 0, cacheMisses: 0 };
+    metricsTimer = null;
+  }, METRICS_IDLE_MS);
+}
+
 function computeWindIntensity(u: Float32Array, v: Float32Array): Float32Array {
   const n = Math.min(u.length, v.length);
   const out = new Float32Array(n);
@@ -51,6 +76,12 @@ function normalizeUrlWithoutVariable(omUrl: string): string {
   return `${u.origin}${u.pathname}${qs ? `?${qs}` : ''}`;
 }
 
+function getBaseFileUrl(omUrl: string): string {
+  const u = new URL(omUrl);
+  // Ignore all query parameters to pool per actual file
+  return `${u.origin}${u.pathname}`;
+}
+
 function cloneOmUrlWithVariable(omUrl: string, variableName: string): string {
   const u = new URL(omUrl);
   u.searchParams.set('variable', variableName);
@@ -67,8 +98,10 @@ async function readVariableValuesCached(
   const now = Date.now();
   const cached = variableCacheByKey.get(key);
   if (cached && now - cached.ts < WIND_CACHE_TTL_MS) {
+    dbg('cache:hit', { key }); bumpCacheHit(); scheduleEmitMetrics();
     return cached.data;
   }
+  dbg('cache:miss_fetch_s3', { key }); bumpCacheMiss(); scheduleEmitMetrics();
   const data = await readVariableValues(cloneOmUrlWithVariable(omUrl, variableName), { value: variableName, label: variableName }, ranges);
   variableCacheByKey.set(key, { ts: now, data });
   return data;
@@ -183,19 +216,28 @@ export async function readVariableValues(omUrl: string, variable: Variable, rang
   dbg('readVariableValues:start', { omUrl, variable: variable.value, ranges });
   // Priorité aux tests locaux via un fichier .om fourni
   const localPath = process.env.OM_FILE_PATH;
-  let reader: OmFileReader;
-  if (localPath) {
-    dbg('readVariableValues:FileBackendNode', { localPath });
-    const fb = new FileBackendNode(localPath);
-    const t0 = timeStart('OmFileReader.create');
-    reader = await OmFileReader.create(fb);
-    timeEnd('OmFileReader.create', t0);
-  } else {
-    const backend = new OmHttpBackend({ url: omUrl, eTagValidation: false });
-    const t1 = timeStart('OmHttpBackend.asCachedReader');
-    reader = await backend.asCachedReader();
-    timeEnd('OmHttpBackend.asCachedReader', t1);
+  const readerKey = localPath ? `file:${localPath}` : `http:${getBaseFileUrl(omUrl)}`;
+  let readerPromise = readerPromiseByKey.get(readerKey);
+  if (!readerPromise) {
+    readerPromise = (async () => {
+      if (localPath) {
+        dbg('readVariableValues:FileBackendNode', { localPath });
+        const fb = new FileBackendNode(localPath);
+        const t0 = timeStart('OmFileReader.create');
+        const r = await OmFileReader.create(fb);
+        timeEnd('OmFileReader.create', t0);
+        return r;
+      } else {
+        const backend = new OmHttpBackend({ url: getBaseFileUrl(omUrl), eTagValidation: false });
+        const t1 = timeStart('OmHttpBackend.asCachedReader');
+        const r = await backend.asCachedReader();
+        timeEnd('OmHttpBackend.asCachedReader', t1);
+        return r;
+      }
+    })();
+    readerPromiseByKey.set(readerKey, readerPromise);
   }
+  const reader = await readerPromise;
   const t2 = timeStart('getChildByName');
   const child = await reader.getChildByName(variable.value);
   if (!child) {
@@ -259,7 +301,8 @@ export async function generateTilePngFromRoute(
   const t1 = timeStart('encodeRgbaToPng');
   const png = encodeRgbaToPng(rgba, TILE_SIZE, TILE_SIZE);
   timeEnd('encodeRgbaToPng', t1);
-  timeEnd('generateTilePngFromRoute', t0);
+  const ms = timeEnd('generateTilePngFromRoute', t0);
+  bumpTile(ms); scheduleEmitMetrics();
   return png;
 }
 

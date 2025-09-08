@@ -14,9 +14,10 @@ export function timeStart(label: string): number {
   return t;
 }
 
-export function timeEnd(label: string, t0: number) {
+export function timeEnd(label: string, t0: number): number {
   const dt = Date.now() - t0;
   dbg(`${label}::end`, { ms: dt });
+  return dt;
 }
 
 
