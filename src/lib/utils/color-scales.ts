@@ -168,10 +168,21 @@ export const colorScales: ColorScales = {
 		max: 40,
 		scalefactor: 1,
 		colors: [
-			...interpolateColorScaleHSL(['blue', 'green'], 10), // 0 to 10kn
-			...interpolateColorScaleHSL(['green', 'orange'], 10), // 10 to 20kn
-			...interpolateColorScaleHSL(['orange', 'red'], 20) // 20 to 40kn
-		],
+        // 0–3 m/s (0–6 kt): blanc → cyan très pâle
+        ...interpolateColorScaleHSL(['hsl(0,0%,100%)', 'hsl(185,60%,88%)'], 2),
+        // 3–6 m/s (6–12 kt): cyan → vert
+        ...interpolateColorScaleHSL(['hsl(185,60%,88%)', 'hsl(140,85%,50%)'], 3),
+        // 6–9 m/s (12–18 kt): vert → jaune
+        ...interpolateColorScaleHSL(['hsl(140,85%,50%)', 'hsl(60,100%,55%)'], 3),
+        // 9–12 m/s (18–24 kt): jaune → orange
+        ...interpolateColorScaleHSL(['hsl(60,100%,55%)', 'hsl(35,100%,55%)'], 3),
+        // 12–15 m/s (24–30 kt): orange → magenta
+        ...interpolateColorScaleHSL(['hsl(35,100%,55%)', 'hsl(325,100%,55%)'], 9),
+        // 15–18 m/s (30–36 kt): magenta → violet
+        ...interpolateColorScaleHSL(['hsl(325,100%,55%)', 'hsl(270,100%,60%)'], 10),
+        // 18–21 m/s (36–42 kt): violet → bleu
+        ...interpolateColorScaleHSL(['hsl(270,100%,60%)', 'hsl(225,100%,60%)'], 10)
+        ],
 		interpolationMethod: 'linear',
 		unit: 'm/s'
 	}
