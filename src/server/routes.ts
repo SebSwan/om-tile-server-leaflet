@@ -6,6 +6,13 @@ import { tileBoundsFromZXY } from './om-url';
 import { sleepTest, poolStats } from './worker-pool';
 
 export function registerTileRoutes(server: FastifyInstance) {
+  // Healthcheck par défaut attendu par kamal-proxy
+  server.get('/up', async (_request, reply) => {
+    reply
+      .header('Access-Control-Allow-Origin', '*')
+      .type('application/json');
+    return reply.send({ up: true });
+  });
   // Route de test du pool: exécute N tâches sleep(1000ms) en parallèle
   server.get('/pool/test', async (request, reply) => {
     const q = request.query as Record<string, string>;
