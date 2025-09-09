@@ -7,7 +7,7 @@
     "dev": "tsx --tsconfig tsconfig.server.json src/server/index.ts",
     "build": "tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
-    "test": "node --test --loader tsx tests/server/*.test.ts"
+    "test": "node --test --import tsx tests/server/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
