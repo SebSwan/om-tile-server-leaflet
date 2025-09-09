@@ -18,7 +18,7 @@ proxy:
 
 # Registre d'images
 registry:
-
+  server: docker.io
   username: etienne99
   password:
     - KAMAL_REGISTRY_PASSWORD # via `.kamal/secrets`
