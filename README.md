@@ -11,6 +11,7 @@ npm run dev
 # écoute par défaut: http://0.0.0.0:3000
 ```
 
+
 ## Route
 
 ```
@@ -78,3 +79,67 @@ node --test --import tsx tests/server/bench.tiles.test.ts | cat
 - Génération tuile: `src/server/tile-service.ts`
 - calcul des bounds → ranges, lecture partielle, interpolation, mapping couleur → PNG
 - Route Fastify: `src/server/routes.ts` et initialisation `src/server/index.ts`
+
+## Docker
+
+### Build
+
+```bash
+docker build -t tile-server-om:latest .
+```
+
+### Run
+
+```bash
+docker run -d --name tile-server-om --restart unless-stopped \
+  -p 3000:3000 \
+  tile-server-om:latest
+```
+
+- Optionnel: variables d’environnement
+
+```bash
+docker run -d --name tile-server-om --restart unless-stopped \
+  -p 3000:3000 \
+  -e OM_BASE_URL=https://map-tiles.open-meteo.com/data_spatial \
+  -e LATEST_BASE_URL=https://openmeteo.s3.amazonaws.com/data_spatial \
+  tile-server-om:latest
+```
+
+- Optionnel: données locales via volume
+
+```bash
+docker run -d --name tile-server-om --restart unless-stopped \
+  -p 3000:3000 \
+  -e OM_FILE_PATH=/data/2025-09-04T0900.om \
+  -v $(pwd)/tests/data:/data:ro \
+  tile-server-om:latest
+```
+
+- Vérification
+
+```bash
+curl -sS http://localhost:3000/pool/stats | jq .
+```
+
+### Docker Compose
+
+```yaml
+services:
+  tile-server-om:
+    image: tile-server-om:latest
+    container_name: tile-server-om
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      OM_BASE_URL: https://map-tiles.open-meteo.com/data_spatial
+      LATEST_BASE_URL: https://openmeteo.s3.amazonaws.com/data_spatial
+    # volumes:
+    #   - ./tests/data:/data:ro
+```
+
+Notes:
+- L’image utilise Node 20 et un utilisateur non-root `node`.
+- Le bundle ESM `dist/server/index.mjs` est utilisé pour éviter les soucis d’extensions.
+- `piscina-worker.mjs` est présent dans `dist/server/` et accessible au runtime.
