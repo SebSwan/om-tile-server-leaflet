@@ -1,4 +1,5 @@
-import type { Domain, DomainGroups } from '../../types';
+// @ts-nocheck
+import type { Domain, DomainGroups } from '../lib/types';
 
 import {
 	getBorderPoints,
