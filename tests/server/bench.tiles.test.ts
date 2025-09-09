@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import dotenv from 'dotenv';
 import { registerTileRoutes } from '../../src/server/routes';
 import { poolStats } from '../../src/server/worker-pool';
 
@@ -25,6 +26,7 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (t:
 
 describe('Bench pool: 1000 tuiles strict route', () => {
   it('scan 1024 tuiles (32x32 @ z=11) et mesure le temps', async () => {
+    dotenv.config();
     if (process.env.ENABLE_BENCH !== '1') return; // opt-in
 
     const localPath = path.resolve(process.cwd(), 'tests/data/2025-09-04T0900.om');

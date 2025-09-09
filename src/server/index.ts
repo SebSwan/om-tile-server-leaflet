@@ -1,16 +1,19 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import dotenv from 'dotenv';
 import { registerTileRoutes } from './routes';
 import { setupGlobalCache } from '@openmeteo/file-reader';
 import { destroyWorkerPool } from './worker-pool';
 import { poolStats } from './worker-pool';
 import { sleepTest } from './worker-pool';
 
+
 // IIFE pour éviter le top-level await
 (async () => {
   // Initialiser le cache global requis par @openmeteo/file-reader
   // Valeurs par défaut: blockSize/maxBlocks internes si non fournis
   setupGlobalCache();
+  dotenv.config();
 
   const server = Fastify({ logger: true });
 
