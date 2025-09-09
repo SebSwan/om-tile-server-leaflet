@@ -2,7 +2,6 @@ import Fastify from 'fastify';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { registerTileRoutes } from '../../src/server/routes';
 import { poolStats } from '../../src/server/worker-pool';
 
@@ -28,13 +27,16 @@ describe('Bench pool: 1000 tuiles strict route', () => {
   it('scan 1024 tuiles (32x32 @ z=11) et mesure le temps', async () => {
     if (process.env.ENABLE_BENCH !== '1') return; // opt-in
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const localPath = path.resolve(__dirname, '../data/2025-09-04T0900.om');
+    const localPath = path.resolve(process.cwd(), 'tests/data/2025-09-04T0900.om');
     process.env.OM_FILE_PATH = localPath; // I/O local + cache main thread
 
     const server = Fastify({ logger: false });
     registerTileRoutes(server);
+
+    // Optionnel: préchauffer le pool pour éviter le coût de cold start
+    if ((process.env.WARMUP_POOL ?? '1') === '1') {
+      await server.inject({ method: 'GET', url: '/pool/test?n=8&ms=0' });
+    }
 
     const model = 'dwd_icon_d2';
     const variable = 'temperature_2m';

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { generateTilePngFromRoute } from './tile-service';
+import { generateTilePngFromRoute, getMetricsSnapshot, resetMetrics } from './tile-service';
 import { resolveOmUrl } from './om-resolver';
 import { dbg, timeStart, timeEnd } from './log';
 import { tileBoundsFromZXY } from './om-url';
@@ -20,6 +20,25 @@ export function registerTileRoutes(server: FastifyInstance) {
       .header('Access-Control-Allow-Origin', '*')
       .type('application/json');
     return reply.send({ ok: true, n, delay, before, after });
+  });
+
+  // Stats du pool
+  server.get('/pool/stats', async (_request, reply) => {
+    const stats = poolStats();
+    reply
+      .header('Access-Control-Allow-Origin', '*')
+      .type('application/json');
+    return reply.send(stats);
+  });
+
+  // Reset métriques agrégées
+  server.get('/metrics/reset', async (_request, reply) => {
+    resetMetrics();
+    const snapshot = getMetricsSnapshot();
+    reply
+      .header('Access-Control-Allow-Origin', '*')
+      .type('application/json');
+    return reply.send({ ok: true, snapshot });
   });
   // Endpoint modèle: renvoie latest.json d'un modèle donné
   server.get('/:model/latest', async (request, reply) => {

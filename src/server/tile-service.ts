@@ -44,6 +44,16 @@ function scheduleEmitMetrics() {
   }, METRICS_IDLE_MS);
 }
 
+export function getMetricsSnapshot(): { tiles: number; totalMs: number; avgMs: number; cacheHits: number; cacheMisses: number } {
+  const reads = metrics.cacheHits + metrics.cacheMisses;
+  const avg = metrics.tiles > 0 ? metrics.totalMs / metrics.tiles : 0;
+  return { tiles: metrics.tiles, totalMs: metrics.totalMs, avgMs: avg, cacheHits: metrics.cacheHits, cacheMisses: metrics.cacheMisses };
+}
+
+export function resetMetrics(): void {
+  metrics = { tiles: 0, totalMs: 0, cacheHits: 0, cacheMisses: 0 };
+}
+
 function computeWindIntensity(u: Float32Array, v: Float32Array): Float32Array {
   const n = Math.min(u.length, v.length);
   const out = new Float32Array(n);
