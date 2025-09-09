@@ -1,8 +1,8 @@
-import { tile2lat, tile2lon, getIndexFromLatLong } from '$lib/utils/math';
-import { getInterpolator } from '$lib/utils/color-scales';
-import type { Domain, Range } from '$lib/types';
-import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
-import { interpolateLinear } from '$lib/utils/interpolations';
+import { tile2lat, tile2lon, getIndexFromLatLong } from '../lib/utils/math';
+import { getInterpolator } from '../lib/utils/color-scales';
+import type { Domain, Range } from '../lib/types';
+import { DynamicProjection, ProjectionGrid, type Projection } from '../lib/utils/projection';
+import { interpolateLinear } from '../lib/utils/interpolations';
 
 type Zxy = { z: number; x: number; y: number };
 

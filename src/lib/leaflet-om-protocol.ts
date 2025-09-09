@@ -12,14 +12,14 @@ import {
 	getIndicesFromBounds,
 	tile2lat,
 	tile2lon
-} from '$lib/utils/math';
+} from './utils/math';
 
-import { domains } from '$lib/utils/domains';
-import { variables } from '$lib/utils/variables';
+import { domains } from './utils/domains';
+import { variables } from './utils/variables';
 import { OMapsFileReader } from '../omaps-reader';
 import TileWorker from '../worker?worker';
 
-import type { TileIndex, Domain, Variable, Range } from '$lib/types';
+import type { TileIndex, Domain, Variable, Range } from './types';
 
 // 🔧 Configuration globale pour Leaflet
 let partial = false;

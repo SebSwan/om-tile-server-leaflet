@@ -1,4 +1,4 @@
-import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
+import { DynamicProjection, ProjectionGrid, type Projection } from './lib/utils/projection';
 
 import { OmDataType, OmHttpBackend } from '@openmeteo/file-reader';
 

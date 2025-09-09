@@ -3,8 +3,24 @@ import { generateTilePngFromRoute } from './tile-service';
 import { resolveOmUrl } from './om-resolver';
 import { dbg, timeStart, timeEnd } from './log';
 import { tileBoundsFromZXY } from './om-url';
+import { sleepTest, poolStats } from './worker-pool';
 
 export function registerTileRoutes(server: FastifyInstance) {
+  // Route de test du pool: exécute N tâches sleep(1000ms) en parallèle
+  server.get('/pool/test', async (request, reply) => {
+    const q = request.query as Record<string, string>;
+    const n = Math.max(1, Math.min(50, Number(q?.n ?? '4')));
+    const delay = Math.max(0, Math.min(10_000, Number(q?.ms ?? '1000')));
+    const t0 = timeStart('pool_test');
+    const before = poolStats();
+    await Promise.all(Array.from({ length: n }, () => sleepTest(delay)));
+    const after = poolStats();
+    timeEnd('pool_test', t0);
+    reply
+      .header('Access-Control-Allow-Origin', '*')
+      .type('application/json');
+    return reply.send({ ok: true, n, delay, before, after });
+  });
   // Endpoint modèle: renvoie latest.json d'un modèle donné
   server.get('/:model/latest', async (request, reply) => {
     const { model } = request.params as Record<string, string>;

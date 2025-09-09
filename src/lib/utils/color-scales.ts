@@ -1,6 +1,6 @@
 import { interpolateHsl, color } from 'd3';
 
-import type { ColorScale, Interpolator, Variable } from '$lib/types';
+import type { ColorScale, Interpolator, Variable } from '../types';
 
 import { noInterpolation, interpolateLinear, interpolate2DHermite } from './interpolations';
 

@@ -1,10 +1,11 @@
-import type { Variable, Domain, Range } from '$lib/types';
-import { domains as knownDomains } from '$lib/utils/domains';
-import { getInterpolator, getColorScale } from '$lib/utils/color-scales';
-import { tile2lat, tile2lon, getIndexFromLatLong, getIndicesFromBounds } from '$lib/utils/math';
+import type { Variable, Domain, Range } from '../lib/types';
+import { domains as knownDomains } from '../lib/utils/domains';
+import { getInterpolator, getColorScale } from '../lib/utils/color-scales';
+import { tile2lat, tile2lon, getIndexFromLatLong, getIndicesFromBounds } from '../lib/utils/math';
 import { tileBoundsFromZXY } from './om-url';
-import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
+import { DynamicProjection, ProjectionGrid, type Projection } from '../lib/utils/projection';
 import { encodeRgbaToPng } from './png';
+import { encodePngInWorker } from './worker-pool';
 import { OmHttpBackend, OmDataType, FileBackendNode, OmFileReader, type TypedArray } from '@openmeteo/file-reader';
 import { dbg, timeStart, timeEnd } from './log';
 import { overlayWindArrowsOnRgba } from './wind-overlay';
@@ -298,9 +299,9 @@ export async function generateTilePngFromRoute(
     const values = await readVariableValues(omUrl, variable, ranges);
     rgba = renderRgbaTile({ z: params.z, x: params.x, y: params.y }, domain, variable, values, ranges);
   }
-  const t1 = timeStart('encodeRgbaToPng');
-  const png = encodeRgbaToPng(rgba, TILE_SIZE, TILE_SIZE);
-  timeEnd('encodeRgbaToPng', t1);
+  const t1 = timeStart('encodeRgbaToPng(worker)');
+  const png = await encodePngInWorker(rgba, TILE_SIZE, TILE_SIZE);
+  timeEnd('encodeRgbaToPng(worker)', t1);
   const ms = timeEnd('generateTilePngFromRoute', t0);
   bumpTile(ms); scheduleEmitMetrics();
   return png;

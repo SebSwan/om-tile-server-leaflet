@@ -1,6 +1,6 @@
 import { DynamicProjection, ProjectionGrid, type Projection } from './projection';
 
-import type { Range, Domain, Bounds, Center, IndexAndFractions } from '$lib/types';
+import type { Range, Domain, Bounds, Center, IndexAndFractions } from '../types';
 
 const r2d = 180 / Math.PI;
 

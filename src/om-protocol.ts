@@ -8,20 +8,20 @@ import {
 	getIndexFromLatLong,
 	getBoundsFromBorderPoints,
 	getIndicesFromBounds
-} from '$lib/utils/math';
+} from './lib/utils/math';
 
-import { getInterpolator } from '$lib/utils/color-scales';
+import { getInterpolator } from './lib/utils/color-scales';
 
-import { domains } from '$lib/utils/domains';
-import { variables } from '$lib/utils/variables';
+import { domains } from './lib/utils/domains';
+import { variables } from './lib/utils/variables';
 
-import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
+import { DynamicProjection, ProjectionGrid, type Projection } from './lib/utils/projection';
 
 import { OMapsFileReader } from './omaps-reader';
 
 import TileWorker from './worker?worker';
 
-import type { TileJSON, TileIndex, Domain, Variable, Bounds, Range, ColorScale } from '$lib/types';
+import type { TileJSON, TileIndex, Domain, Variable, Bounds, Range, ColorScale } from './lib/types';
 
 let partial = false;
 let domain: Domain;
@@ -216,7 +216,7 @@ export const omProtocol = async (
 		try {
 			await initOMFile(params.url);
 		} catch (e) {
-			throw new Error(e);
+			throw new Error(e as any);
 		}
 		return {
 			data: await getTilejson(params.url)

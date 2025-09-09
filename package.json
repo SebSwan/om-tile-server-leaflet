@@ -4,17 +4,19 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "tsx src/server/index.ts",
+    "dev": "tsx --tsconfig tsconfig.server.json src/server/index.ts",
     "build": "tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "test": "node --test --loader tsx tests/server/*.test.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^9.0.1",
     "@openmeteo/file-format-wasm": "^0.0.11",
     "@openmeteo/file-reader": "^0.0.11",
-    "@fastify/cors": "^9.0.1",
     "d3": "^7.9.0",
     "fastify": "^4.28.1",
+    "piscina": "^5.1.3",
+    "workerpool": "^6.5.1",
     "pngjs": "^7.0.0"
   },
   "devDependencies": {

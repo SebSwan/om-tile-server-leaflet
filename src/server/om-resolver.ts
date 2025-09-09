@@ -1,6 +1,6 @@
 import { tileBoundsFromZXY } from './om-url';
 import { dbg, timeStart, timeEnd } from './log';
-import { pad } from '$lib/utils/pad';
+import { pad } from '../lib/utils/pad';
 
 type Zxy = { z: number; x: number; y: number };
 

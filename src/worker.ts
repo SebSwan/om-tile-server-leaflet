@@ -1,14 +1,14 @@
-import { hideZero, drawOnTiles } from '$lib/utils/variables';
+import { hideZero, drawOnTiles } from './lib/utils/variables';
 
-import { DynamicProjection, ProjectionGrid, type Projection } from '$lib/utils/projection';
+import { DynamicProjection, ProjectionGrid, type Projection } from './lib/utils/projection';
 
-import { tile2lat, tile2lon, getIndexFromLatLong } from '$lib/utils/math';
+import { tile2lat, tile2lon, getIndexFromLatLong } from './lib/utils/math';
 
-import { getColorScale, getInterpolator } from '$lib/utils/color-scales';
+import { getColorScale, getInterpolator } from './lib/utils/color-scales';
 import type { TypedArray } from '@openmeteo/file-reader';
-import { interpolateLinear } from '$lib/utils/interpolations';
+import { interpolateLinear } from './lib/utils/interpolations';
 
-import type { ColorScale, Domain, IndexAndFractions } from '$lib/types';
+import type { ColorScale, Domain, IndexAndFractions } from './lib/types';
 
 const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE) || 256;
 const OPACITY = Number(import.meta.env.VITE_TILE_OPACITY);
