@@ -169,15 +169,15 @@ export const colorScales: ColorScales = {
 		scalefactor: 1,
 		colors: [
         // 0–3 m/s (0–6 kt): blanc → cyan très pâle
-        ...interpolateColorScaleHSL(['hsl(0,0%,100%)', 'hsl(185,60%,88%)'], 2),
-        // 3–6 m/s (6–12 kt): cyan → vert
+        ...interpolateColorScaleHSL(['hsl(0,0%,100%)', 'hsl(185,60%,88%)'], 3),
+        // 2–6 m/s (4–12 kt): cyan → vert
         ...interpolateColorScaleHSL(['hsl(185,60%,88%)', 'hsl(140,85%,50%)'], 3),
-        // 6–9 m/s (12–18 kt): vert → jaune
+        // 5–9 m/s (10–18 kt): vert → jaune
         ...interpolateColorScaleHSL(['hsl(140,85%,50%)', 'hsl(60,100%,55%)'], 3),
-        // 9–12 m/s (18–24 kt): jaune → orange
+        // 8–12 m/s (16–24 kt): jaune → orange
         ...interpolateColorScaleHSL(['hsl(60,100%,55%)', 'hsl(35,100%,55%)'], 3),
         // 12–15 m/s (24–30 kt): orange → magenta
-        ...interpolateColorScaleHSL(['hsl(35,100%,55%)', 'hsl(325,100%,55%)'], 9),
+        ...interpolateColorScaleHSL(['hsl(35,100%,55%)', 'hsl(325,100%,55%)'], 8),
         // 15–18 m/s (30–36 kt): magenta → violet
         ...interpolateColorScaleHSL(['hsl(325,100%,55%)', 'hsl(270,100%,60%)'], 10),
         // 18–21 m/s (36–42 kt): violet → bleu
