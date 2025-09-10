@@ -317,4 +317,81 @@ export async function generateTilePngFromRoute(
   return png;
 }
 
+// --- Valeur interpolée à une lat/lon donnée ---
+export async function getValueAtLatLonFromRoute(
+  params: { domain: string; variable: string; lat: number; lon: number },
+  omUrl: string
+): Promise<{ value: number; unit?: string }> {
+  const domain = pickDomain(params.domain);
+  const variable: Variable = { value: params.variable, label: params.variable };
+
+  // Déterminer une fenêtre 2x2 minimale autour du point pour lecture partielle
+  const nxFull = domain.grid.nx;
+  const nyFull = domain.grid.ny;
+
+  let ranges: Range[];
+  let indexLocal = 0;
+  let xFraction = 0;
+  let yFraction = 0;
+
+  if (domain.grid.projection) {
+    // Grilles projetées: utiliser ProjectionGrid pour trouver l'index global et les fractions,
+    // puis découper une fenêtre locale 2x2 et ajuster l'index à 0.
+    const projection = new DynamicProjection(domain.grid.projection.name, domain.grid.projection) as Projection;
+    const projectionGrid = new ProjectionGrid(projection, domain.grid);
+    const p = projectionGrid.findPointInterpolated(params.lat, params.lon);
+    if (!Number.isFinite(p.index)) {
+      return { value: NaN };
+    }
+    const gx = Math.max(0, Math.min(nxFull - 2, Math.floor((p.index as number) % nxFull)));
+    const gy = Math.max(0, Math.min(nyFull - 2, Math.floor((p.index as number) / nxFull)));
+    ranges = [
+      { start: gy, end: gy + 2 },
+      { start: gx, end: gx + 2 }
+    ];
+    indexLocal = 0;
+    xFraction = p.xFraction;
+    yFraction = p.yFraction;
+  } else {
+    // Grilles régulières: calculer index global, puis fenêtre locale 2x2, puis recalcul local
+    const full = getIndexFromLatLong(params.lat, params.lon, domain);
+    if (!Number.isFinite(full.index)) {
+      return { value: NaN };
+    }
+    const gx = Math.max(0, Math.min(nxFull - 2, Math.floor((full.index as number) % nxFull)));
+    const gy = Math.max(0, Math.min(nyFull - 2, Math.floor((full.index as number) / nxFull)));
+    ranges = [
+      { start: gy, end: gy + 2 },
+      { start: gx, end: gx + 2 }
+    ];
+    const local = getIndexFromLatLong(params.lat, params.lon, domain, ranges);
+    indexLocal = local.index;
+    xFraction = local.xFraction;
+    yFraction = local.yFraction;
+  }
+
+  // Lecture partielle: 2x2 valeurs suffisent pour l'interpolation bilinéaire/hermite
+  const nxLocal = getNxFromRanges(domain, ranges);
+
+  let values: Float32Array;
+  if (variable.value === 'wind_10m') {
+    try {
+      const [u, v] = await Promise.all([
+        readVariableValuesCached(omUrl, 'wind_u_component_10m', ranges),
+        readVariableValuesCached(omUrl, 'wind_v_component_10m', ranges)
+      ]);
+      values = computeWindIntensity(u, v);
+    } catch {
+      values = await readVariableValues(omUrl, { value: 'wind_10m', label: 'wind_10m' }, ranges);
+    }
+  } else {
+    values = await readVariableValues(omUrl, variable, ranges);
+  }
+
+  const colorScale = getColorScale(variable);
+  const interpolator = getInterpolator(colorScale);
+  const value = interpolator(values as unknown as Float32Array, nxLocal, indexLocal, xFraction, yFraction);
+  return { value, unit: colorScale.unit };
+}
+
 

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { generateTilePngFromRoute, getMetricsSnapshot, resetMetrics } from './tile-service';
+import { generateTilePngFromRoute, getMetricsSnapshot, resetMetrics, getValueAtLatLonFromRoute } from './tile-service';
 import { resolveOmUrl } from './om-resolver';
 import { dbg, timeStart, timeEnd } from './log';
 import { tileBoundsFromZXY } from './om-url';
@@ -134,6 +134,46 @@ export function registerTileRoutes(server: FastifyInstance) {
         .code(502)
         .type('application/json');
       return reply.send({ error: 'tile_generation_failed' });
+    }
+  });
+
+  // Valeur interpolée à lat/lon pour un run/heure stricts
+  // /value/:model/:variable/:yyyy/:mm/:dd/:runZ/:timeOm?lat=..&lon=..
+  server.get('/value/:model/:variable/:yyyy/:mm/:dd/:runZ/:timeOm', async (request, reply) => {
+    const { model, variable, yyyy, mm, dd, runZ, timeOm } = request.params as Record<string,string>;
+    const q = request.query as Record<string, string>;
+    const lat = Number(q?.lat);
+    const lon = Number(q?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      reply.header('Access-Control-Allow-Origin', '*').code(400).type('application/json');
+      return reply.send({ error: 'invalid_lat_lon' });
+    }
+    try {
+      if (!/\d{4}/.test(yyyy) || !/\d{2}/.test(mm) || !/\d{2}/.test(dd) || !/\d{4}Z/.test(runZ) || !/\.om$/.test(timeOm)) {
+        reply.header('Access-Control-Allow-Origin', '*').code(400).type('application/json');
+        return reply.send({ error: 'invalid_path_segments' });
+      }
+      const strictBase = process.env.OM_STRICT_BASE || 'https://openmeteo.s3.amazonaws.com/data_spatial';
+      const path = `${strictBase}/${model}/${yyyy}/${mm}/${dd}/${runZ}/${timeOm}`;
+      const u = new URL(path);
+      u.searchParams.set('variable', variable);
+      // pour lecture partielle minime, on n’a pas de bounds liées à une tuile; on laissera la fonction faire une fenêtre 2x2 locale
+      // partial=false pour autoriser le backend à découper
+      u.searchParams.set('partial', 'false');
+      const finalUrl = u.toString();
+
+      const { value, unit } = await getValueAtLatLonFromRoute({ domain: model, variable, lat, lon }, finalUrl);
+      reply
+        .header('Access-Control-Allow-Origin', '*')
+        .type('application/json');
+      return reply.send({ value, unit, lat, lon, model, variable, yyyy, mm, dd, runZ, timeOm });
+    } catch (err: any) {
+      request.server.log.error({ err }, 'value endpoint failed');
+      reply
+        .header('Access-Control-Allow-Origin', '*')
+        .code(502)
+        .type('application/json');
+      return reply.send({ error: 'value_computation_failed' });
     }
   });
 }
