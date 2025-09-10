@@ -2,10 +2,8 @@ node_modules
 
 # Output
 .output
-.vercel
 .netlify
 .wrangler
-/.svelte-kit
 /build
 
 # OS
@@ -18,5 +16,5 @@ Thumbs.db
 !.env.example
 !.env.test
 
-.kamal/secrets
-.kamal/dockerhub_token
+/.kamal
+/config

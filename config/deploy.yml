@@ -18,9 +18,8 @@ proxy:
 
 # Registre d'images
 registry:
-  server: ghcr.io
-  image: ghcr.io/SebSwan/tile-server-om
-  username: SebSwan
+  server: docker.io
+  username: etienne99
   password:
     - KAMAL_REGISTRY_PASSWORD # via `.kamal/secrets`
 
