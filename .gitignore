@@ -18,3 +18,5 @@ Thumbs.db
 !.env.example
 !.env.test
 
+.kamal/secrets
+.kamal/dockerhub_token
