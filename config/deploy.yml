@@ -1,0 +1,64 @@
+# Nom unique du service / conteneur
+service: tile-server-om
+
+# Image publiée dans un registre (ex: GHCR). Remplace <org> par ton org/utilisateur GitHub.
+image: etienne99/tile-server-om
+
+# Cibles de déploiement (VMs Hetzner)
+servers:
+  web:
+    - 91.99.172.192
+
+# Reverse proxy Traefik managé par Kamal
+# - Décommente `ssl` et `host` si tu as un domaine pour Let's Encrypt
+proxy:
+  # ssl: true
+  # host: tiles.example.com
+  app_port: 3000
+
+# Registre d'images
+registry:
+  server: docker.io
+  username: etienne99
+  password:
+    - KAMAL_REGISTRY_PASSWORD # via `.kamal/secrets`
+
+# Paramètres de build (machines Hetzner amd64)
+builder:
+  arch: amd64
+
+# Variables d'environnement de l'app (non sensibles)
+env:
+  clear:
+    NODE_ENV: production
+    PORT: 3000
+    WARMUP_POOL: "1"
+    METRICS: "1"
+    OM_BASE_URL: https://map-tiles.open-meteo.com/data_spatial
+    LATEST_BASE_URL: https://openmeteo.s3.amazonaws.com/data_spatial
+    #OM_FILE_PATH: /data/2025-09-04T0900.om
+  # secret:
+  #   - SOME_SECRET_NAME
+
+# Déploiement progressif (utile si plusieurs hôtes)
+# boot:
+#   limit: 50%
+#   wait: 2
+
+# Alias pratiques (ex: `bin/kamal logs`)
+aliases:
+  logs: app logs -f -r web
+  shell: app exec --interactive --reuse "sh"
+
+# Volumes persistants (facultatif)
+# volumes:
+#   - "/var/data/tiles:/data"
+
+# Exemple d'accessoire monitoring (à ajouter plus tard si besoin)
+# accessories:
+#   uptime:
+#     image: louislam/uptime-kuma:1
+#     host: 91.99.172.192
+#     port: 3001
+#     directories:
+#       - data:/app/data
